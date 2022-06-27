@@ -1,0 +1,1725 @@
+---
+title: "Follow-up paper facility patient volume CNS"
+author: "Kim Johnson"
+date: "7/30/2021"
+output: html_document
+---
+# load libraries
+```{r}
+#install.packages("pacman")
+pacman::p_load(readr, haven, arsenal, survival, table1, dplyr, tidyr, lmtest, tidyverse, openxlsx, DiagrammeR, survRM2, magrittr, mlr, geepack, odds.n.ends, miceadds, sandwich, coxme, lme4, patchwork, ggbreak, RColorBrewer, ggpubr, survminer)
+```
+
+# Load data from Box
+```{r}
+FVA_CNS<-read_sas("ncdb_CNS.sas7bdat")
+
+FVA_BRAIN<-read_sas("ncdb_Brain.sas7bdat")
+
+FVA_CNS2<-rbind(FVA_CNS, FVA_BRAIN)
+
+#select variables
+FVA_CNS2<-FVA_CNS2 %>%
+  select(PUF_CASE_ID, AGE, SEX, RACE, CLASS_OF_CASE, SPANISH_HISPANIC_ORIGIN, INSURANCE_STATUS,  YEAR_OF_DIAGNOSIS, NO_HSD_QUAR_00, NO_HSD_QUAR_12, NO_HSD_QUAR_2016, MED_INC_QUAR_00, MED_INC_QUAR_12, MED_INC_QUAR_2016, PRIMARY_SITE, HISTOLOGY, PUF_VITAL_STATUS, PUF_FACILITY_ID, SEQUENCE_NUMBER, PUF_MULT_SOURCE, FACILITY_TYPE_CD, DX_LASTCONTACT_DEATH_MONTHS, RX_SUMM_SURG_PRIM_SITE, RX_HOSP_SURG_PRIM_SITE, RAD_LOCATION_OF_RX, RX_SUMM_CHEMO, RX_HOSP_CHEMO, RX_HOSP_HORMONE, RX_HOSP_IMMUNOTHERAPY, RX_SUMM_OTHER, GRADE)
+
+table(FVA_CNS2$GRADE)
+```
+
+# Data management
+```{r}
+#make age groups
+FVA_CNS2$age_cat<-ifelse(FVA_CNS2$AGE<15, 0,
+                         ifelse(FVA_CNS2$AGE>=15 & FVA_CNS2$AGE<=39, 1,
+                         ifelse(FVA_CNS2$AGE>39 & FVA_CNS2$AGE<65,2,
+                         ifelse(FVA_CNS2$AGE >=65,3, NA))))
+
+FVA_CNS2$age_cat<-factor(FVA_CNS2$age_cat, levels=c(0:3),
+                         labels=c("0 to 14",
+                                  "15 to 39",
+                                  "40 to 64", 
+                                  "65+"))
+table(FVA_CNS2$age_cat, useNA="always")
+
+#categorized age further
+FVA_CNS2$age_cat2<-ifelse(FVA_CNS2$AGE<5, 0,
+                        ifelse(FVA_CNS2$AGE>=5 & FVA_CNS2$AGE<10, 1,
+                        ifelse(FVA_CNS2$AGE>=10 & FVA_CNS2$AGE<=15,2,
+                        ifelse(FVA_CNS2$AGE >=15 & FVA_CNS2$AGE<20,3,
+                        ifelse(FVA_CNS2$AGE >=20 & FVA_CNS2$AGE<29,4,
+                        ifelse(FVA_CNS2$AGE >=30 & FVA_CNS2$AGE<39,5,
+                        ifelse(FVA_CNS2$AGE >=40 & FVA_CNS2$AGE<49,6,
+                        ifelse(FVA_CNS2$AGE >=50 & FVA_CNS2$AGE<59,7,
+                        ifelse(FVA_CNS2$AGE >=60 & FVA_CNS2$AGE<69,8, 
+                        ifelse(FVA_CNS2$AGE >=70 & FVA_CNS2$AGE<79,9,
+                        ifelse(FVA_CNS2$AGE >=80, 10,
+                                NA)))))))))))
+
+#recode sex
+FVA_CNS2$sex<-ifelse(FVA_CNS2$SEX==1,1, #males coded as 1
+                     ifelse(FVA_CNS2$SEX==2, 0, NA)) #females coded as 0
+
+FVA_CNS2$sex<- factor(FVA_CNS2$sex, levels=c(1:0),labels=c("Male","Female"))
+table(FVA_CNS2$sex, useNA="always")
+
+#recode race/ethnicity
+#Code for White 1
+#Code for Black 2
+#Code for American Indian/Alaskan Native 3
+#Code for Asian or Pacific Islander >=4 and <98
+FVA_CNS2$Race_cat<-ifelse(FVA_CNS2$RACE==1 & FVA_CNS2$SPANISH_HISPANIC_ORIGIN==0, 0, 
+                          ifelse(FVA_CNS2$RACE==2 & FVA_CNS2$SPANISH_HISPANIC_ORIGIN==0, 1, 
+                          ifelse(FVA_CNS2$RACE==3 & FVA_CNS2$SPANISH_HISPANIC_ORIGIN==0,2,
+                          ifelse(FVA_CNS2$RACE>=4 & FVA_CNS2$RACE<98 & FVA_CNS2$SPANISH_HISPANIC_ORIGIN==0, 3,
+                          ifelse(FVA_CNS2$RACE==98  & FVA_CNS2$SPANISH_HISPANIC_ORIGIN==0, 4,
+                          ifelse(FVA_CNS2$SPANISH_HISPANIC_ORIGIN>0 &  FVA_CNS2$SPANISH_HISPANIC_ORIGIN<9, 5, NA))))))
+
+FVA_CNS2$Race_cat<- factor(FVA_CNS2$Race_cat,levels=c(0:5),
+                           labels=c("Non-Hispanic White",
+                                    "Non-Hispanic Black",
+                                    "Non-Hispanic American Indian/Alaskan Native", 
+                                    "Non-Hispanic Asian or Pacific Islander", 
+                                    "Non-Hispanic Other", "Hispanic"))
+
+table(FVA_CNS2$Race_cat,  useNA="always")
+table(FVA_CNS2$Race_cat, FVA_CNS2$SPANISH_HISPANIC_ORIGIN, useNA="always")
+test<-FVA_CNS2 %>%
+  filter(SPANISH_HISPANIC_ORIGIN==9)
+table(test$RACE, useNA="always")
+
+#recode race
+FVA_CNS2$Race_cat2<-ifelse(FVA_CNS2$RACE==1, 0, 
+                    ifelse(FVA_CNS2$RACE==2, 1, 
+                    ifelse(FVA_CNS2$RACE==3, 2,
+                    ifelse(FVA_CNS2$RACE>=4 & FVA_CNS2$RACE<98, 3, 
+                    ifelse(FVA_CNS2$RACE==98, 4, NA)))))
+
+FVA_CNS2$Race_cat2<- factor(FVA_CNS2$Race_cat2,levels=c(0:4), 
+                            labels=c("White",
+                                     "Black",
+                                     "American Indian/Alaskan Native", 
+                                     "Asian or Pacific Islander", 
+                                     "Other"))
+table(FVA_CNS2$Race_cat2,  useNA="always")
+
+#label primary payer
+FVA_CNS2$insurance<-factor(FVA_CNS2$INSURANCE_STATUS, levels=c(0:4), 
+                           labels=c("Not Insured", 
+                                    "Private Insurance/Managed Care", 
+                                    "Medicaid", "Medicare", 
+                                    "Other Government"))
+table(FVA_CNS2$insurance, useNA="always")
+
+#education quartiles (This measure of educational attainment for each patient's area of residence is estimated by matching the zip code of the patient recorded at the time of diagnosis against files derived from the 2012 American Community Survey data, spanning years 2000, 2008-2012, and 2012-2016). For individuals diagnosed 2004-2006, use 2000, for those diagnosed 2007-2011, use 2008-2012, for those diagnosed 2012-2017, use 2012-2016
+
+FVA_CNS2<-FVA_CNS2 %>%
+  mutate(educ=case_when(YEAR_OF_DIAGNOSIS <2007 & NO_HSD_QUAR_00==1~0,
+                      YEAR_OF_DIAGNOSIS <2007 & NO_HSD_QUAR_00==2~1,
+                      YEAR_OF_DIAGNOSIS <2007 & NO_HSD_QUAR_00==3~2,
+                      YEAR_OF_DIAGNOSIS <2007 & NO_HSD_QUAR_00==4~3,
+                      (YEAR_OF_DIAGNOSIS >=2007 & YEAR_OF_DIAGNOSIS <2012)  & NO_HSD_QUAR_12==1~0,
+                      (YEAR_OF_DIAGNOSIS >=2007 & YEAR_OF_DIAGNOSIS <2012)  & NO_HSD_QUAR_12==2~1,
+                      (YEAR_OF_DIAGNOSIS >=2007 & YEAR_OF_DIAGNOSIS <2012)  & NO_HSD_QUAR_12==3~2,
+                      (YEAR_OF_DIAGNOSIS >=2007 & YEAR_OF_DIAGNOSIS <2012)  & NO_HSD_QUAR_12==4~3,
+                      YEAR_OF_DIAGNOSIS >=2012 & NO_HSD_QUAR_2016==1~0,
+                      YEAR_OF_DIAGNOSIS >=2012 & NO_HSD_QUAR_2016==2~1,
+                      YEAR_OF_DIAGNOSIS >=2012 & NO_HSD_QUAR_2016==3~2,
+                      YEAR_OF_DIAGNOSIS >=2012 & NO_HSD_QUAR_2016==4~3))
+
+FVA_CNS2$educ<-factor(FVA_CNS2$educ, levels=c(0:3), 
+                      labels=c("Education Q1", 
+                               "Education Q2", 
+                               "Education Q3", 
+                               "Education Q4"))
+
+
+#income quartiles  (Median household income for each patient's area of residence is estimated by matching the zip code of the patient recorded at the time of diagnosis against files derived from the  American Community Survey data.)  For individuals diagnosed 2004-2006, use 2000, for those diagnosed 2007-2011, use 2008-2012, for those diagnosed 2012-2017, use 2012-2016.
+
+FVA_CNS2<-FVA_CNS2 %>%
+  mutate(income=case_when(YEAR_OF_DIAGNOSIS <2007 & MED_INC_QUAR_00==1~0,
+                      YEAR_OF_DIAGNOSIS <2007 & MED_INC_QUAR_00==2~1,
+                      YEAR_OF_DIAGNOSIS <2007 & MED_INC_QUAR_00==3~2,
+                      YEAR_OF_DIAGNOSIS <2007 & MED_INC_QUAR_00==4~3,
+                      (YEAR_OF_DIAGNOSIS >=2007 & YEAR_OF_DIAGNOSIS <2012)  & MED_INC_QUAR_12==1~0,
+                      (YEAR_OF_DIAGNOSIS >=2007 & YEAR_OF_DIAGNOSIS <2012)  & MED_INC_QUAR_12==2~1,
+                      (YEAR_OF_DIAGNOSIS >=2007 & YEAR_OF_DIAGNOSIS <2012)  & MED_INC_QUAR_12==3~2,
+                      (YEAR_OF_DIAGNOSIS >=2007 & YEAR_OF_DIAGNOSIS <2012)  & MED_INC_QUAR_12==4~3,
+                      YEAR_OF_DIAGNOSIS >=2012 & MED_INC_QUAR_2016==1~0,
+                      YEAR_OF_DIAGNOSIS >=2012 & MED_INC_QUAR_2016==2~1,
+                      YEAR_OF_DIAGNOSIS >=2012 & MED_INC_QUAR_2016==3~2,
+                      YEAR_OF_DIAGNOSIS >=2012 & MED_INC_QUAR_2016==4~3))
+
+FVA_CNS2$income<-factor(FVA_CNS2$income, levels=c(0:3), 
+                        labels=c("Income Q1", 
+                                 "Income Q2", 
+                                 "Income Q3", 
+                                 "Income Q4"))
+
+table(FVA_CNS2$income, useNA="always")
+
+#Surgery at any facility
+FVA_CNS2<-FVA_CNS2 %>%
+  mutate(Surgery_AF=case_when(RX_SUMM_SURG_PRIM_SITE==0~0,
+                                        RX_SUMM_SURG_PRIM_SITE>=10 & RX_SUMM_SURG_PRIM_SITE<99~1))
+
+
+
+FVA_CNS2$Surgery_AF<-factor(FVA_CNS2$Surgery_AF, levels=c(0:1),
+                            labels=c("No surgery",
+                                     "Surgery"))
+
+table(FVA_CNS2$Surgery_AF, useNA = "always")
+
+#Surgery at reporting facility
+FVA_CNS2<-FVA_CNS2 %>%
+  mutate(Surgery_TF=case_when(RX_HOSP_SURG_PRIM_SITE==0~0,
+                              RX_HOSP_SURG_PRIM_SITE>=10 & RX_HOSP_SURG_PRIM_SITE<99 ~1))
+
+FVA_CNS2$Surgery_TF<-factor(FVA_CNS2$Surgery_TF, levels=c(0:1),
+                            labels=c("No surgery",
+                                     "Surgery"))
+
+FVA_CNS2<- FVA_CNS2 %>%
+  mutate(Rad_AF=case_when(RAD_LOCATION_OF_RX==0 ~0, #no radiation
+                             RAD_LOCATION_OF_RX %in% c(1,2,3,4) ~1))#any radiation 
+                            
+
+FVA_CNS2$Rad_AF<-factor(FVA_CNS2$Rad_AF, levels=c(0:1),
+                            labels=c("No radiation",
+                                     "Any radiation"))
+
+table(FVA_CNS2$Rad_AF, useNA = "always")
+
+#chemo first course at any facility
+
+FVA_CNS2 <-FVA_CNS2 %>%
+  mutate(Chemo_AF=case_when(RX_SUMM_CHEMO %in% c(0, 82, 85, 86, 87) ~0,
+                             RX_SUMM_CHEMO>0 & RX_SUMM_CHEMO <4 ~1))
+
+FVA_CNS2$Chemo_AF<-factor(FVA_CNS2$Chemo_AF, levels=c(0:1),
+                            labels=c("No chemotherapy",
+                                     "Chemotherapy"))
+
+table(FVA_CNS2$Chemo_AF, useNA = "always")
+
+```
+
+# Code malignant CNS2 tumors
+```{r}
+# CNS2
+FVA_CNS2$PRIMARY_SITE2<-substr(FVA_CNS2$PRIMARY_SITE, 2,4) #Need to remove the C from the primary site label for reclassification
+table(FVA_CNS2$PRIMARY_SITE2)
+class(FVA_CNS2$PRIMARY_SITE2)
+FVA_CNS2$PRIMARY_SITE2<-as.numeric(FVA_CNS2$PRIMARY_SITE2) 
+
+FVA_CNS2<-FVA_CNS2 %>%
+  mutate(CNStype=case_when(
+    (PRIMARY_SITE2 %in% c(723) & HISTOLOGY %in% c(9380))|(PRIMARY_SITE2 %in% c(000:809) & HISTOLOGY %in% c(9410, 9411, 9420, 9421, 9424)) ~ "3.1.1 Specified low-grade astrocytic tumors",
+    PRIMARY_SITE2 %in% c(000:809) & HISTOLOGY %in% c(9401, 9440:9442) ~ "3.1.2 Glioblastoma and anaplastic astrocytoma",
+    PRIMARY_SITE2 %in% c(0:809) & HISTOLOGY %in% c(9400) ~ "3.1.3 Astrocytoma, NOS", 
+    PRIMARY_SITE2 %in% c(0:722, 724:809) & HISTOLOGY %in% c(9380) ~ "3.2 Other glioma",
+    PRIMARY_SITE2 %in% c(0:809) & HISTOLOGY %in% c(9381:9384, 9423, 9430, 9450:9451, 9460) ~ "3.2 Other glioma",
+    PRIMARY_SITE2 %in% c(0:809) & HISTOLOGY %in% c(9391:9394) ~ "3.3 Ependymoma",
+    PRIMARY_SITE2 %in% c(716) & HISTOLOGY %in% c(9470:9474) ~ "3.4.1 Medulloblastoma",
+    PRIMARY_SITE2 %in% c(0:715, 717:809) & HISTOLOGY %in% c(9470:9474) ~ "3.4.2 Supratentorial PNET",
+    (PRIMARY_SITE2 %in% c(0:699, 730:750, 754:809) & HISTOLOGY %in% c(9350:9351, 9360:9362, 9390, 9480, 9530:9535, 9537:9539, 9541, 9550, 9562, 9570))|
+    (PRIMARY_SITE2 %in% c(700:729, 751:753) & HISTOLOGY %in% c(9161, 9361:9362, 9390, 9530:9531, 9535, 9538, 9540, 9560, 9571))| 
+    (PRIMARY_SITE2 %in% c(700) & HISTOLOGY %in% c(9532, 9534, 9537, 9539))|(PRIMARY_SITE2==753 & HISTOLOGY==9360)|
+    (PRIMARY_SITE2==711 & HISTOLOGY %in% c(9480, 9539))| (PRIMARY_SITE2==713 & HISTOLOGY %in% c(9480, 9533))|
+    (PRIMARY_SITE2==719 & HISTOLOGY %in% c(9350))|
+    (PRIMARY_SITE2%in%c(714, 717) & HISTOLOGY %in% c(9480))|
+    (PRIMARY_SITE2%in%c(709) & HISTOLOGY %in% c(9539)) ~ "3.5 Other specified intracranial and intraspinal neoplasms",
+    (PRIMARY_SITE2 %in% c(700:729, 751:753) & HISTOLOGY %in% c(8000:8005)) ~ "3.6 Unspecified intracranial and intraspinal neoplasms"))
+
+
+#recode vital status
+FVA_CNS2$dead[FVA_CNS2$PUF_VITAL_STATUS==1]<-0
+FVA_CNS2$dead[FVA_CNS2$PUF_VITAL_STATUS==0]<-1
+table(FVA_CNS2$dead, FVA_CNS2$PUF_VITAL_STATUS, useNA="always")
+table(FVA_CNS2$CNStype, useNA = "always")   
+
+table(FVA_CNS2[which(is.na(FVA_CNS2$CNStype)),]$HISTOLOGY, FVA_CNS2[which(is.na(FVA_CNS2$CNStype)),]$PRIMARY_SITE)
+```
+
+# Exclusion Code to determine facility exclusions and exclude individuals reported at facilities that didn't report all years
+```{r}
+tab<-table(FVA_CNS2$PUF_FACILITY_ID, FVA_CNS2$YEAR_OF_DIAGNOSIS)
+tab2<-as.data.frame.matrix(tab)
+colnames(tab2)<-c("yr04", "yr05", "yr06", "yr07", "yr08", "yr09", "yr10","yr11", "yr12", "yr13", "yr14", "yr15","yr16", "yr17") #R doesn't like numerical column names
+tab2<-cbind(facility=rownames(tab2), tab2) #turn rows into a column (one column)
+rownames(tab2)<-NULL #remove row names from first 'column'
+#Code to exclude facilities not reporting all years
+tab3<-subset(tab2, yr04==0|yr05==0|yr06==0|yr07==0|yr08==0|yr09==0|yr10==0|yr11==0|yr12==0|yr13==0|yr14==0|yr15==0|yr16==0|yr17==0)
+facility<-as.vector(tab3$facility)
+facility
+typeof(facility)
+
+#Remove anyone with a facility vector value 
+exclude1<-FVA_CNS2[!(FVA_CNS2$PUF_FACILITY_ID%in%facility),]
+
+exclude1$Seq_no<-as.numeric(exclude1$SEQUENCE_NUMBER)
+
+table(exclude1$SEQUENCE_NUMBER)
+```
+
+
+# Need to do separate coding for facility volume for peds and adolescents/adults
+```{r}
+#The set of commented out code defines quartiles on an individual level. Need to redefine on a facility level because for adults Q4 only contains one facility.
+# create Peds dataset (0-14 years)
+peds_exclude1 <- exclude1 %>%
+  filter(exclude1$AGE<15)
+
+table(exclude1$YEAR_OF_DIAGNOSIS)
+
+# create adolescent and adults data set (15+)
+aa_exclude1 <- exclude1 %>%
+  filter(exclude1$AGE>=15)
+
+#calculate sum facility volume for each facility
+peds_facility_vol<-peds_exclude1 %>%
+  count(PUF_FACILITY_ID) %>%
+  rename(CNS_VOL=n) %>%
+  mutate(CNS_VOL=CNS_VOL/14)
+
+median(peds_facility_vol$CNS_VOL)
+test<-peds_facility_vol %>%
+  filter(CNS_VOL>4)
+hist(test$CNS_VOL)
+hist(peds_facility_vol$CNS_VOL)
+
+A<-ggplot(peds_facility_vol, aes(CNS_VOL)) +
+ geom_histogram(color="black", fill="black") +
+  labs(title="a. Pediatric", y = "Count of facilities", x="Facility CNS patient volume/year")+
+  theme(plot.title = element_text(face="bold"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(),   panel.background = element_blank(),axis.line = element_line(colour = "black"),
+        axis.title.x=element_text(face="bold"), axis.title.y=element_text(face="bold")) +
+geom_vline(aes(xintercept=1.42857143), color="blue", linetype="dashed") +
+geom_vline(aes(xintercept=3.35714286), color="blue", linetype="dashed") +
+geom_vline(aes(xintercept=9.29285714), color="blue", linetype="dashed") +
+geom_vline(aes(xintercept=14.50714286), color="blue", linetype="dashed") +
+annotate("text", x = 0, y = 75, label = "P1", fontface="bold", size=3) +
+annotate("text", x = 2.5, y = 75, label = "P2",fontface="bold", size=3) +
+annotate("text", x = 6.35, y = 75, label = "P3", fontface="bold",size=3) +
+annotate("text", x = 11.9, y = 75, label = "P4", fontface="bold",size=3) +
+annotate("text", x = 20, y = 75, label = "P5", fontface="bold",size=3) +
+  ylim(0,80)
+A 
+
+quantile(peds_facility_vol$CNS_VOL, probs = seq(.1, 1, by = .05))#note quantiles are at facility level
+
+peds_CNS<-merge(peds_exclude1, peds_facility_vol, by="PUF_FACILITY_ID")
+
+
+#make percentile categories
+peds_CNS<-peds_CNS %>%
+  mutate(vol_ptile=case_when(CNS_VOL<=1.42857143~0, #<=70th
+                             CNS_VOL>1.42857143 & CNS_VOL <=3.35714286 ~1, #>70-80
+                             CNS_VOL>3.35714286 & CNS_VOL <=9.29285714 ~2, #>80-90
+                             CNS_VOL>9.29285714 & CNS_VOL <=14.50714286  ~3, #>90-95
+                             CNS_VOL>14.50714286~4)) #>95
+
+table(peds_CNS$vol_ptile)
+
+peds_CNS$CNS_VOL_flag<-"peds"
+
+peds_CNS$vol_ptile<-factor(peds_CNS$vol_ptile, levels=c(0:4), labels=c("<=70", ">70-80", ">80-90", ">90-95", ">95"))
+
+#adult code
+#calculate facility volume for each facility
+aa_facility_vol<-aa_exclude1 %>%
+  count(PUF_FACILITY_ID) %>%
+  rename(CNS_VOL=n)%>%
+  mutate(CNS_VOL=CNS_VOL/14)
+quantile(aa_facility_vol$CNS_VOL, probs = seq(.1, 1, by = .05))
+
+aa_CNS<-merge(aa_exclude1, aa_facility_vol,  by="PUF_FACILITY_ID")
+aa_CNS <- aa_CNS %>%
+mutate(vol_ptile=case_when(CNS_VOL<=43.271429 ~0, #<=70th
+                           CNS_VOL>43.271429 & CNS_VOL<=60.500000 ~1, #>70-80
+                           CNS_VOL>60.500000 & CNS_VOL<=94.814286 ~2, #>80-90
+                           CNS_VOL>94.814286 & CNS_VOL <=145.885714 ~3, #>90-95
+                           CNS_VOL >145.885714 ~4)) #>95
+table(aa_CNS$vol_ptile)
+
+B<-ggplot(aa_facility_vol, aes(CNS_VOL)) +
+ geom_histogram(color="black", fill="black") +
+  labs(title="b. Adolescents and adults" , y = "Count of facilities", x="Facility CNS patient volume/year")+
+  theme(plot.title = element_text(face="bold"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(),axis.line = element_line(colour = "black"),
+        axis.title.x=element_text(face="bold"), axis.title.y=element_text(face="bold")) +
+geom_vline(aes(xintercept=43.271429), color="blue", linetype="dashed") +
+geom_vline(aes(xintercept=60.500000), color="blue", linetype="dashed") +
+geom_vline(aes(xintercept=94.814286), color="blue", linetype="dashed") +
+geom_vline(aes(xintercept=145.885714), color="blue", linetype="dashed") +
+annotate("text", x = 0, y = 400,  label = "P1", fontface="bold",size=3) +
+annotate("text", x = 51.9, y = 400, label = "P2", fontface="bold",  size=3) +
+annotate("text", x = 77.65, y = 400,  label = "P3", fontface="bold",  size=3) +
+annotate("text", x = 120.3, y = 400, label = "P4", fontface="bold", size=3) +
+annotate("text", x = 190, y = 400,   label = "P5", fontface="bold", size=3) 
+B
+
+pdf("Sup Figure 1 Facility volume histograms.pdf", width=11, height=10, paper="USr")
+A + B + plot_layout(ncol=1, nrow=2, guides='collect') &
+  theme(legend.position='bottom')
+dev.off()
+
+aa_CNS$vol_ptile<-factor(aa_CNS$vol_ptile, levels=c(0:4), labels=c("<=70", ">70-80", ">80-90", ">90-95", ">95"))
+
+aa_CNS$CNS_VOL_flag<-"adult"
+
+boxplot(aa_CNS$CNS_VOL)
+boxplot(peds_CNS$CNS_VOL)
+#bind adults and kids back together
+exclude1<-rbind(peds_CNS, aa_CNS)
+
+```
+
+# Exclusions
+```{r}
+#include only first malignant CNS tumors diagnosed 
+exclude2<-exclude1[which(exclude1$Seq_no %in%c(0,1)),]
+
+#Exclude individuals seen at more that one facility
+exclude3<-exclude2[which(exclude2$PUF_MULT_SOURCE==0),]
+
+#Exclude individuals diagnosed in 2017
+exclude3<-exclude3%>%
+  filter(YEAR_OF_DIAGNOSIS!=2017) #156,890
+
+#Exclude individuals with class of case 00
+
+exclude3<-exclude3 %>%
+  filter(CLASS_OF_CASE>0) #148894
+```
+
+# Need to exclude missing data
+```{r}
+#examine missing data for variables used in the analysis
+attach(exclude3)
+table(age_cat, useNA="always")
+table(Race_cat2, useNA="always")
+table(Race_cat2, RACE, useNA ="always")
+table(insurance, useNA="always")
+table(income, useNA="always")
+table(educ, useNA="always")
+table(CNStype, useNA="always")
+table(dead, useNA="always")
+table(vol_ptile, useNA="always")
+detach(exclude3)
+
+exclude3<-exclude3 %>% #148894
+  drop_na(age_cat) %>% #148894
+  drop_na(Race_cat2) %>% #146784
+  drop_na(insurance) %>% #142736
+  drop_na(income) %>% #133553
+  drop_na(educ) %>% # 133548
+  drop_na(CNStype) %>% #130841
+  drop_na(dead) %>% #130841
+  drop_na(DX_LASTCONTACT_DEATH_MONTHS) %>% #130830
+  drop_na(vol_ptile) #130830
+
+table(exclude2$dead, exclude2$YEAR_OF_DIAGNOSIS, useNA = "always")
+table(exclude2$YEAR_OF_DIAGNOSIS)
+table(exclude3$PUF_FACILITY_ID)
+table(exclude3$GRADE, useNA="always")
+```
+
+# Figure 1: flowchart 
+```{r}
+Figure1<-grViz("digraph flowchart {
+      # node definitions with substituted label text
+      node [fontname = Helvetica, shape = rectangle, fontsize=16]        
+      tab1 [label = '@@1']
+      tab2 [label = '@@2']
+      tab3 [label = '@@3']
+      tab4 [label = '@@4']
+      tab5 [label = '@@5']
+      tab6 [label = '@@6']
+      tab7 [label = '@@7']
+      # edge definitions with the node IDs
+      tab1 -> tab2 -> tab3 -> tab4 -> tab5 -> tab6 -> tab7;
+      }
+      [1]: 'Records received for patients diagnosed with CNS tumors from 2004-2016 n=625,697'
+      [2]: 'Excluding 60,136 individuals seen at facilities not reporting in all years n=565,561' 
+      [3]: 'Excluding 366,787 individuals not diagnosed with a first primary CNS tumor malignancy n=198,774'
+      [4]: 'Excluding 28,889 individuals seen at more than one facility n=169,855'
+      [5]: 'Excluding 12,965 individuals diagnosed in 2017 n= 156,890'
+      [6]: 'Excluding 7,966 individuals diagnosed but not treated at reporting facility n=148,894'
+      [7]: 'Excluding 18,064 individuals with missing data on variables used in the analysis n=130,830'
+      ")
+Figure1
+```
+
+## Table 1
+```{r}
+label(exclude3$age_cat)<-"Age category"
+label(exclude3$sex)<-"Sex"
+label(exclude3$insurance)<-"Insurance at diagnosis or first treatment"
+label(exclude3$educ)<-"Zip-code median percent no high school degree quartile 2012-2016"
+label(exclude3$income)<-"Zip-code median income quartile 2012-2016"
+label(exclude3$CNStype)<-"CNS tumor subtype"
+label(exclude3$Race_cat)<-"Race/ethnicity category"
+label(exclude3$Race_cat2)<-"Race category"
+label(exclude3$Surgery_AF)<-"Surgical procedure of primary site at any facility"
+label(exclude3$Rad_AF)<-"Radiation at any facility"
+label(exclude3$Chemo_AF)<-"First course of chemotherapy at any facility"
+
+#make dead a factor variable just for this table
+exclude3$dead2<-factor(exclude3$dead, levels=c(0,1), labels= c("Alive", "Deceased"))
+label(exclude3$dead2)<-"Vital status"
+
+table1(~ age_cat+ sex + Race_cat2 + insurance + income + educ + CNStype + Surgery_AF + Rad_AF + Chemo_AF+ dead2|vol_ptile, overall="Total", exclude3)
+```
+
+# KM curves
+```{r}
+#make function for KM curves for age groups
+KMplots<-function(age_catf, figtitle){
+  x<-exclude3 %>%
+  filter(age_cat==age_catf) 
+  survob <- survfit(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead) ~ vol_ptile, data=x)
+  
+ggsurvplot(survob, data=x,  pval=TRUE,  pval.method = FALSE,  ylim=c(0,1),  size=0.3, 
+           conf.int=FALSE, censor=TRUE,  title=figtitle,  censor.size=0.5, 
+           legend.title="Volume category", legend.labs=c("<=70",">70-80", ">80-90", ">90-95", ">95"),
+           xlab="Survival time (months)") +
+
+             theme_survminer(font.main = c(12, "bold", "black"), 
+                legend=c("bottom"), 
+                font.legend=c(12, "bold", "black"), 
+                font.y=c(12, "bold"), font.x=c(12, "bold"))
+}
+
+A<-KMplots(age_catf = "0 to 14", figtitle="a")
+B<-KMplots("15 to 39", "b")
+C<-KMplots("40 to 64", "c")
+D<-KMplots("65+", "d")
+
+pdf("Figure 2 age groups.pdf", width=11, height=10, paper="USr")
+A$plot + B$plot + C$plot+ D$plot+ plot_layout(ncol=2, nrow=2, guides='collect') &
+  theme(legend.position='bottom')
+dev.off()
+
+#make function for KM curves for age groups and tumor type
+KMplots<-function(age_catf, tumortype, figtitle){
+  x<-exclude3 %>%
+  filter(age_cat==age_catf) %>%
+    filter(CNStype==tumortype)
+  survob <- survfit(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead) ~ vol_ptile, data=x)
+ggsurvplot(survob, data=x,  pval=TRUE, ylim=c(0,1),  size=0.3, conf.int=FALSE, censor=TRUE,  title=figtitle,  censor.size=0.5, legend.title="Volume category", legend.labs=c("<=70",">70-80", ">80-90", ">90-95", ">95"),
+           xlab="Survival time (months)")+
+theme_survminer(font.main = c(12, "bold", "black"), legend=c("bottom"), font.legend=c(12, "bold", "black"), font.y=c(12, "bold"), font.x=c(12, "bold"))
+}
+
+A<-KMplots("0 to 14", "3.1.1 Specified low-grade astrocytic tumors", "a. 3.1.1 Specified low-grade \n astrocytic tumors")
+B<-KMplots("0 to 14", "3.1.2 Glioblastoma and anaplastic astrocytoma", "b. 3.1.2 Glioblastoma and \n anaplastic astrocytoma")
+C<-KMplots("0 to 14", "3.1.3 Astrocytoma, NOS", "c. 3.1.3 Astrocytoma, NOS")
+D<-KMplots("0 to 14", "3.2 Other glioma", "d. 3.2 Other glioma")
+E<-KMplots("0 to 14", "3.3 Ependymoma", "e. 3.3 Ependymoma")
+F<-KMplots("0 to 14", "3.4.1 Medulloblastoma", "f. 3.4.1 Medulloblastoma")
+G<-KMplots("0 to 14", "3.4.2 Supratentorial PNET", "g. 3.4.2 Supratentorial PNET")
+H<-KMplots("0 to 14", "3.5 Other specified intracranial and intraspinal neoplasms", "h. 3.5 Other specified intracranial and \n intraspinal neoplasms")
+I<-KMplots("0 to 14", "3.6 Unspecified intracranial and intraspinal neoplasms", "i. 3.6 Unspecified intracranial and \n intraspinal neoplasms")
+
+pdf("Sup Figure 2 0 to 14 years.pdf", width=11, height=10, paper="USr")
+A$plot + B$plot + C$plot+ D$plot+ E$plot +F$plot +G$plot +H$plot +I$plot+ plot_layout(ncol=3, nrow=3, guides='collect') &
+  theme(legend.position='bottom')
+dev.off()
+
+A<-KMplots("15 to 39", "3.1.1 Specified low-grade astrocytic tumors", "a. 3.1.1 Specified low-grade \n astrocytic tumors")
+B<-KMplots("15 to 39", "3.1.2 Glioblastoma and anaplastic astrocytoma", "b. 3.1.2 Glioblastoma and \n anaplastic astrocytoma")
+C<-KMplots("15 to 39", "3.1.3 Astrocytoma, NOS", "c. 3.1.3 Astrocytoma, NOS")
+D<-KMplots("15 to 39", "3.2 Other glioma", "d. 3.2 Other glioma")
+E<-KMplots("15 to 39", "3.3 Ependymoma", "e. 3.3 Ependymoma")
+F<-KMplots("15 to 39", "3.4.1 Medulloblastoma", "f. 3.4.1 Medulloblastoma")
+G<-KMplots("15 to 39", "3.4.2 Supratentorial PNET", "g. 3.4.2 Supratentorial PNET")
+H<-KMplots("15 to 39", "3.5 Other specified intracranial and intraspinal neoplasms", "h. 3.5 Other specified intracranial and \n intraspinal neoplasms")
+I<-KMplots("15 to 39", "3.6 Unspecified intracranial and intraspinal neoplasms", "i. 3.6 Unspecified intracranial and \n intraspinal neoplasms")
+
+pdf("Sup Figure 3 15 to 39 years.pdf", width=11, height=10, paper="USr")
+A$plot + B$plot + C$plot+ D$plot+ E$plot +F$plot +G$plot +H$plot +I$plot+ plot_layout(ncol=3, nrow=3, guides='collect') &
+  theme(legend.position='bottom')
+dev.off()
+
+A<-KMplots("40 to 64", "3.1.1 Specified low-grade astrocytic tumors", "a. 3.1.1 Specified low-grade \n astrocytic tumors")
+B<-KMplots("40 to 64", "3.1.2 Glioblastoma and anaplastic astrocytoma", "b. 3.1.2 Glioblastoma and \n anaplastic astrocytoma")
+C<-KMplots("40 to 64", "3.1.3 Astrocytoma, NOS", "c. 3.1.3 Astrocytoma, NOS")
+D<-KMplots("40 to 64", "3.2 Other glioma", "d. 3.2 Other glioma")
+E<-KMplots("40 to 64", "3.3 Ependymoma", "e. 3.3 Ependymoma")
+F<-KMplots("40 to 64", "3.4.1 Medulloblastoma", "f. 3.4.1 Medulloblastoma")
+G<-KMplots("40 to 64", "3.4.2 Supratentorial PNET", "g. 3.4.2 Supratentorial PNET")
+H<-KMplots("40 to 64", "3.5 Other specified intracranial and intraspinal neoplasms", "h. 3.5 Other specified intracranial and \n intraspinal neoplasms")
+I<-KMplots("40 to 64", "3.6 Unspecified intracranial and intraspinal neoplasms", "i. 3.6 Unspecified intracranial and \n intraspinal neoplasms")
+
+pdf("Sup Figure 4 40 to 64 years.pdf", width=11, height=10, paper="USr")
+A$plot + B$plot + C$plot+ D$plot+ E$plot +F$plot +G$plot +H$plot +I$plot+ plot_layout(ncol=3, nrow=3, guides='collect') &
+  theme(legend.position='bottom')
+dev.off()
+
+A<-KMplots("65+", "3.1.1 Specified low-grade astrocytic tumors", "a. 3.1.1 Specified low-grade \n astrocytic tumors")
+B<-KMplots("65+", "3.1.2 Glioblastoma and anaplastic astrocytoma", "b. 3.1.2 Glioblastoma and \n anaplastic astrocytoma")
+C<-KMplots("65+", "3.1.3 Astrocytoma, NOS", "c. 3.1.3 Astrocytoma, NOS")
+D<-KMplots("65+", "3.2 Other glioma", "d. 3.2 Other glioma")
+E<-KMplots("65+", "3.3 Ependymoma", "e. 3.3 Ependymoma")
+F<-KMplots("65+", "3.4.1 Medulloblastoma", "f. 3.4.1 Medulloblastoma")
+G<-KMplots("65+", "3.4.2 Supratentorial PNET", "g. 3.4.2 Supratentorial PNET")
+H<-KMplots("65+", "3.5 Other specified intracranial and intraspinal neoplasms", "h. 3.5 Other specified intracranial and \n intraspinal neoplasms")
+I<-KMplots("65+", "3.6 Unspecified intracranial and intraspinal neoplasms", "i. 3.6 Unspecified intracranial and \n intraspinal neoplasms")
+
+pdf("Sup Figure 5 65+ years.pdf", width=11, height=10, paper="USr")
+A$plot + B$plot + C$plot+ D$plot+ E$plot +F$plot +G$plot +H$plot +I$plot+ plot_layout(ncol=3, nrow=3, guides='collect') &
+  theme(legend.position='bottom')
+dev.off()
+
+```
+# Cox models for univariate analysis
+```{r}
+#Cox models with RSE to account for clustering
+CoxAge<-function(age_catf){
+  x<-exclude3 %>%
+  filter(age_cat==age_catf) 
+  y<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + cluster(PUF_FACILITY_ID), x)
+   o<<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~CNS_VOL + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + cluster(PUF_FACILITY_ID), x) #p-trend
+  pval<-summary(o)$coefficients[1,6]
+  y<-as.data.frame(exp(cbind(HR = coef(y), confint(y))))
+  y<-y %>%
+    rownames_to_column() %>%
+    rename(Volume_category=rowname)%>%
+    mutate(agegroup=age_catf, ptrend=pval) %>%
+    mutate(model="univariate")
+}
+
+a<-CoxAge("0 to 14")
+b<-CoxAge("15 to 39")
+c<-CoxAge("40 to 64")
+d<-CoxAge("65+")
+
+table2a<-rbind(a,b,c,d)
+```
+
+# Cox models for multivariable analysis
+```{r}
+#Cox models
+CoxAgeAdj<-function(age_catf){
+  x<-exclude3 %>%
+  filter(age_cat==age_catf) 
+  y<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + cluster(PUF_FACILITY_ID), x)
+    o<<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~CNS_VOL + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + cluster(PUF_FACILITY_ID), x) #p-trend
+  pval<-summary(o)$coefficients[1,6]
+   y<-as.data.frame(exp(cbind(HR = coef(y), confint(y))))
+   y<-y[c(1,2,3,4),]
+   y<-y %>%
+    rownames_to_column() %>%
+    rename(Volume_category=rowname)%>%
+    mutate(agegroup=age_catf, ptrend=pval) %>%
+    mutate(model="adjusted for Race, age, educ, income, insurance, sex, and CNS tumor type")
+  
+}
+
+e<-CoxAgeAdj("0 to 14")
+f<-CoxAgeAdj("15 to 39")
+g<-CoxAgeAdj("40 to 64")
+h<-CoxAgeAdj("65+")
+
+table2b<-rbind(e,f,g,h)
+```
+
+# Table 2
+```{r}
+table2<-rbind(table2a, table2b)
+table2$HR<-round(table2$HR,2)
+table2$`2.5 %`<-round(table2$`2.5 %`,2)
+table2$`97.5 %`<-round(table2$`97.5 %`,2)
+```
+
+# Check for EM by race, sex, CNS tumor type
+```{r}
+#Cox models for race interaction
+CoxAgeAdj<-function(age_catf){
+  x<<-exclude3 %>%
+  filter(age_cat==age_catf) 
+  mod1<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + cluster(PUF_FACILITY_ID), x)
+  mod2<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + Race_cat2*vol_ptile + cluster(PUF_FACILITY_ID), x)
+  lrtest(mod1, mod2)%>%
+   mutate(agegroup=age_catf,
+          interaction="Race_cat2")
+}
+
+e<-CoxAgeAdj("0 to 14")
+f<-CoxAgeAdj("15 to 39") 
+g<-CoxAgeAdj("40 to 64")
+h<-CoxAgeAdj("65+")
+
+table_supa<-rbind(e,f,g,h)
+
+#Cox models for sex interaction
+CoxAgeAdj<-function(age_catf){
+  x<-exclude3 %>%
+  filter(age_cat==age_catf) 
+  mod1<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + cluster(PUF_FACILITY_ID), x)
+  mod2<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + sex*vol_ptile + cluster(PUF_FACILITY_ID), x)
+  lrtest(mod1, mod2) %>%
+   mutate(agegroup=age_catf,
+          interaction="Sex")
+}
+
+e<-CoxAgeAdj("0 to 14")
+f<-CoxAgeAdj("15 to 39") 
+g<-CoxAgeAdj("40 to 64")
+h<-CoxAgeAdj("65+")
+
+table_supb<-rbind(e,f,g,h)
+
+#Cox models for CNStype interaction
+CoxAgeAdj<-function(age_catf){
+  x<-exclude3 %>%
+  filter(age_cat==age_catf) 
+  mod1<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + cluster(PUF_FACILITY_ID), x)
+  mod2<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + AGE +Race_cat2 + educ +income +insurance + sex + CNStype + CNStype*vol_ptile + cluster(PUF_FACILITY_ID), x)
+  lrtest(mod1, mod2) %>%
+   mutate(agegroup=age_catf,
+          interaction="CNS type")
+}
+
+e<-CoxAgeAdj("0 to 14")
+f<-CoxAgeAdj("15 to 39") 
+g<-CoxAgeAdj("40 to 64")
+h<-CoxAgeAdj("65+")
+
+table_supc<-rbind(e,f,g,h)
+```
+
+# Bind interaction tables
+```{r}
+options(scipen=999)
+Sup_table1<-rbind(table_supa, table_supb, table_supc)
+Sup_table1$`Pr(>Chisq)`<-round(Sup_table1$`Pr(>Chisq)`, 9)
+```
+
+# Stratify by tumor type
+```{r}
+table(exclude3$Race_cat)
+
+CoxCNS<-function(age_catf, CNStypef){
+  x<-exclude3 %>%
+  filter(age_cat==age_catf & CNStype==CNStypef) 
+  m<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + AGE + Race_cat2 + educ +income +insurance + sex + cluster(PUF_FACILITY_ID), x)
+  o<<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~CNS_VOL + AGE + Race_cat2 + educ +income +insurance + sex + cluster(PUF_FACILITY_ID), x) #p-trend
+  pval<-summary(o)$coefficients[1,6]
+  n<-as.data.frame(exp(cbind(HR = coef(m), confint(m)))) #calculate HRs and 95% CIs
+  n<-n[c(1,2,3,4),]
+  n %>%
+    rownames_to_column() %>%
+    rename(Volume_percentile=rowname)%>%
+    mutate(CNStype=CNStypef,
+           agegroup=age_catf, ptrend=pval)
+
+  
+}
+A<-CoxCNS("0 to 14", "3.1.1 Specified low-grade astrocytic tumors")
+B<-CoxCNS("0 to 14", "3.1.2 Glioblastoma and anaplastic astrocytoma")
+C<-CoxCNS("0 to 14", "3.1.3 Astrocytoma, NOS")
+D<-CoxCNS("0 to 14", "3.2 Other glioma")
+E<-CoxCNS("0 to 14", "3.3 Ependymoma")
+F<-CoxCNS("0 to 14", "3.4.1 Medulloblastoma")
+G<-CoxCNS("0 to 14", "3.4.2 Supratentorial PNET")
+H<-CoxCNS("0 to 14", "3.5 Other specified intracranial and intraspinal neoplasms")
+I<-CoxCNS("0 to 14", "3.6 Unspecified intracranial and intraspinal neoplasms")
+
+sup_table2a<-rbind(A,B,C,D,E,F,G,H, I) #exclude H, numbers are all 0
+
+A<-CoxCNS("15 to 39", "3.1.1 Specified low-grade astrocytic tumors")
+B<-CoxCNS("15 to 39", "3.1.2 Glioblastoma and anaplastic astrocytoma")
+C<-CoxCNS("15 to 39", "3.1.3 Astrocytoma, NOS")
+D<-CoxCNS("15 to 39", "3.2 Other glioma")
+E<-CoxCNS("15 to 39", "3.3 Ependymoma")
+F<-CoxCNS("15 to 39", "3.4.1 Medulloblastoma") 
+G<-CoxCNS("15 to 39", "3.4.2 Supratentorial PNET") 
+H<-CoxCNS("15 to 39", "3.5 Other specified intracranial and intraspinal neoplasms")
+I<-CoxCNS("15 to 39", "3.6 Unspecified intracranial and intraspinal neoplasms")
+
+sup_table2b<-rbind(A,B,C,D,E,F,G,H,I)
+
+A<-CoxCNS("40 to 64", "3.1.1 Specified low-grade astrocytic tumors")
+B<-CoxCNS("40 to 64", "3.1.2 Glioblastoma and anaplastic astrocytoma")
+C<-CoxCNS("40 to 64", "3.1.3 Astrocytoma, NOS")
+D<-CoxCNS("40 to 64", "3.2 Other glioma")
+E<-CoxCNS("40 to 64", "3.3 Ependymoma") 
+F<-CoxCNS("40 to 64", "3.4.1 Medulloblastoma") 
+G<-CoxCNS("40 to 64", "3.4.2 Supratentorial PNET")
+H<-CoxCNS("40 to 64", "3.5 Other specified intracranial and intraspinal neoplasms")
+I<-CoxCNS("40 to 64", "3.6 Unspecified intracranial and intraspinal neoplasms")
+
+sup_table2c<-rbind(A,B,C,D,E,F,G,H,I)
+
+A<-CoxCNS("65+", "3.1.1 Specified low-grade astrocytic tumors")
+B<-CoxCNS("65+", "3.1.2 Glioblastoma and anaplastic astrocytoma")
+C<-CoxCNS("65+", "3.1.3 Astrocytoma, NOS")
+D<-CoxCNS("65+", "3.2 Other glioma")
+E<-CoxCNS("65+", "3.3 Ependymoma") 
+F<-CoxCNS("65+", "3.4.1 Medulloblastoma") #too few caes, model did not converge. Do not include.
+G<-CoxCNS("65+", "3.4.2 Supratentorial PNET")
+H<-CoxCNS("65+", "3.5 Other specified intracranial and intraspinal neoplasms")
+I<-CoxCNS("65+", "3.6 Unspecified intracranial and intraspinal neoplasms")
+sup_table2d<-rbind(A,B,C,D,E,F,G,H,I)
+
+options(scipen=999, round=3)
+Sup_table2<-rbind(sup_table2a, sup_table2b, sup_table2c, sup_table2d)
+Sup_table2$HR<-round(Sup_table2$HR,2)
+Sup_table2$`2.5 %`<-round(Sup_table2$`2.5 %`,2)
+Sup_table2$`97.5 %`<-round(Sup_table2$`97.5 %`,2)
+Sup_table2$ptrend<-round(Sup_table2$ptrend, 6)
+
+numbers<-exclude3 %>%
+  group_by(age_cat) %>%
+  count(CNStype)
+```
+
+# Turn Sup_table2 into forest plot figure
+```{r}
+mylist<-unique(Sup_table2$CNStype)
+mylist
+
+Sup_table2 <-Sup_table2 %>%
+  mutate(CNS.type=factor(CNStype),
+         CNS.type=factor(CNS.type,levels=mylist))
+#functions have different exclusions
+plotCNS0<-function(agecat, title){
+Sup_table2 %>%
+    filter(agegroup==agecat,
+           CNStype !="3.6 Unspecified intracranial and intraspinal neoplasms",
+           CNStype !="3.5 Other specified intracranial and intraspinal neoplasms",
+           CNStype !="3.4.2 Supratentorial PNET") %>%
+  ggplot(aes(x =Volume_percentile, y =HR,  ymin=`2.5 %`, ymax=`97.5 %`, color=Volume_percentile), lwd=0.3) +
+  geom_point(size=0.2) +
+  geom_pointrange(size=.2) + 
+  geom_hline(yintercept=1, lty=2, color="black") +  # add a dotted line at x=1 after flip
+  scale_x_discrete(labels=c(">70-80 vs. <=70", ">80-90  vs. <=70", ">90-95 vs. <=70", ">95 vs. <=70"), expand=c(.1, .1)) +
+  scale_y_continuous(breaks=waiver()) +
+  scale_colour_brewer(palette = "Dark2") +
+  coord_flip() +
+  facet_wrap(~CNS.type, nrow=3, ncol=3, strip.position = c("top"),  labeller = labeller(CNS.type = label_wrap_gen(28)), scales="free_x") +  
+  theme(strip.background = element_blank(),
+        strip.text.x = element_text(face="bold", size=8),
+        axis.ticks.y = element_blank(),
+        axis.title.y=element_blank(),
+        strip.text = element_text(size=9), 
+        panel.background = element_blank(),
+        axis.line.x = element_line(color="black", size = 0.7),
+        axis.text.x = element_text(size=7),
+        axis.text.y = element_text(size=7),
+        axis.title.x = element_text(size=9, face="bold")) +
+theme(legend.position="none")  +
+    ggtitle(title) +
+    theme(plot.title = element_text(face = "bold")) 
+}
+
+plotCNS<-function(agecat, title){
+Sup_table2 %>%
+    filter(agegroup==agecat,
+           CNStype !="3.6 Unspecified intracranial and intraspinal neoplasms",
+           CNStype !="3.4.1 Medulloblastoma",
+           CNStype !="3.4.2 Supratentorial PNET") %>%
+  ggplot(aes(x =Volume_percentile, y =HR,  ymin=`2.5 %`, ymax=`97.5 %`, color=Volume_percentile), lwd=0.3) +
+  geom_point(size=0.2) +
+  geom_pointrange(size=.2) + 
+  geom_hline(yintercept=1, lty=2, color="black") +  # add a dotted line at x=1 after flip
+  scale_x_discrete(labels=c(">70-80 vs. <=70", ">80-90  vs. <=70", ">90-95 vs. <=70", ">95 vs. <=70"), expand=c(.1, .1)) +
+  scale_y_continuous(breaks=waiver()) +
+  scale_colour_brewer(palette = "Dark2") +
+  coord_flip() +
+  facet_wrap(~CNS.type, nrow=3, ncol=3, strip.position = c("top"),  labeller = labeller(CNS.type = label_wrap_gen(28)), scales="free_x") +  
+  theme(strip.background = element_blank(),
+        strip.text.x = element_text(face="bold", size=8),
+        axis.ticks.y = element_blank(),
+        axis.title.y=element_blank(),
+        strip.text = element_text(size=9), 
+        panel.background = element_blank(),
+        axis.line.x = element_line(color="black", size = 0.7),
+        axis.text.x = element_text(size=7),
+        axis.text.y = element_text(size=7),
+        axis.title.x = element_text(size=9, face="bold")) +
+theme(legend.position="none")  +
+    ggtitle(title) +
+    theme(plot.title = element_text(face = "bold")) 
+}
+
+a<- plotCNS0(agecat="0 to 14", title="a")
+a
+b<- plotCNS(agecat="15 to 39", title="b")
+b
+c<- plotCNS("40 to 64", "c")
+c
+d<- plotCNS("65+", "d")
+d
+
+
+pdf("Figure 3.pdf", width=11, height=10, paper="USr")
+a + b+c +d  + plot_layout(ncol=2, nrow=2, guides='collect')
+dev.off()
+
+```
+
+# Is the volume effect modified by facility type?
+```{r}
+#Cox models for facility interaction
+CoxAgeAdj<-function(age_catf){
+  x<-exclude3 %>%
+  filter(age_cat==age_catf) 
+  mod1<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + as.factor(FACILITY_TYPE_CD), x)
+  mod2<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + as.factor(FACILITY_TYPE_CD) + +as.factor(FACILITY_TYPE_CD)*vol_ptile, x)
+  lrtest(mod1, mod2)
+}
+
+g<-CoxAgeAdj("40 to 64")
+g
+
+h<-CoxAgeAdj("65+")
+h
+```
+
+# Stratify by facility type
+```{r}
+CoxCNS<-function(age_catf, ftypef){
+  x<<-exclude3 %>%
+  filter(age_cat==age_catf & FACILITY_TYPE_CD==ftypef) 
+  m<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + AGE + Race_cat2 + educ +income +insurance + sex + CNStype, x)
+  n<-as.data.frame(exp(cbind(HR = coef(m), confint(m)))) #calculate HRs and 95% CIs
+  n<-n[c(1,2,3,4),]
+  n %>%
+    rownames_to_column() %>%
+    rename(Volume_category=rowname)%>%
+    mutate(FACILITY_TYPE_CD=ftypef,
+           agegroup=age_catf)
+}
+a<-CoxCNS("40 to 64", 1) 
+b<-CoxCNS("40 to 64", 2)
+c<-CoxCNS("40 to 64", 3)
+d<-CoxCNS("40 to 64", 4)
+
+e<-CoxCNS("65+", 1) 
+f<-CoxCNS("65+", 2)
+g<-CoxCNS("65+", 3)
+h<-CoxCNS("65+", 4)
+
+facility_type<-rbind(a,b,c,d,e,f,g,h)
+table(x$FACILITY_TYPE_CD, x$vol_ptile)
+```
+# PH assumption
+```{r}
+CoxAgeAdj<-function(age_catf){
+  x<-exclude3 %>%
+  filter(age_cat==age_catf) 
+  y<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + cluster(PUF_FACILITY_ID), x)
+  y<-cox.zph(y, terms=TRUE)
+  plot(y)
+  y<-as.data.frame(y$table)
+  y %>%
+    rownames_to_column() %>%
+    rename(Variable=rowname)%>%
+    mutate(agegroup=age_catf)
+}
+
+e<-CoxAgeAdj("0 to 14")
+f<-CoxAgeAdj("15 to 39")
+g<-CoxAgeAdj("40 to 64")
+h<-CoxAgeAdj("65+")
+
+Sup_table3<-rbind(e,f,g,h)
+Sup_table3<-Sup_table3 %>%
+  filter(Variable== "vol_ptile")
+Sup_table3$p<-round(Sup_table3$p, 5)
+```
+# address PH Assumption by dividing into intervals 
+```{r}
+PHresults<-function(age_catf, t, survt, time){
+  x<-exclude3 %>%
+  filter(age_cat==age_catf & DX_LASTCONTACT_DEATH_MONTHS>=t)
+  x <- x %>%
+  mutate(surv=if_else(DX_LASTCONTACT_DEATH_MONTHS<survt, DX_LASTCONTACT_DEATH_MONTHS, survt)) %>%
+  mutate(dead=if_else((surv<survt) & dead==1, 1, 0))
+  m<-coxph(Surv(surv, dead)~vol_ptile + Race_cat2 + AGE + educ +income +insurance + sex + CNStype + cluster(PUF_FACILITY_ID), x)
+  n<-as.data.frame(exp(cbind(HR = coef(m), confint(m)))) #calculate HRs and 95% CIs
+  n<-n[c(1,2,3,4),]
+  n %>%
+    rownames_to_column() %>%
+    rename(Volume_category=rowname)%>%
+    mutate(agegroup=age_catf, `time interval`=time) %>%
+    add_row(Volume_category="vol_ptile<=70", HR=1.0, `2.5 %`=NA, `97.5 %`=NA, agegroup=age_catf, `time interval`=time, .before=1)
+}
+
+#need sep function for >36
+PHresults2<-function(age_catf, t, time){
+  x<-exclude3 %>%
+  filter(age_cat==age_catf & DX_LASTCONTACT_DEATH_MONTHS>t)
+  m<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + cluster(PUF_FACILITY_ID), x)
+  n<-as.data.frame(exp(cbind(HR = coef(m), confint(m)))) #calculate HRs and 95% CIs
+  n<-n[c(1,2,3,4),]
+  n %>%
+    rownames_to_column() %>%
+    rename(Volume_category=rowname)%>%
+    mutate(agegroup=age_catf, `time interval`=time) %>%
+    add_row(Volume_category="vol_ptile<=70", HR=1.0, `2.5 %`=NA, `97.5 %`=NA, agegroup=age_catf, `time interval`=time, .before=1)
+}
+  
+a<-PHresults("40 to 64", 0, 12, "0 to 12 months")
+b<-PHresults("40 to 64", 12, 24, ">12 to 24 months")
+c<-PHresults("40 to 64", 24, 36, ">24 to 36 months")
+d<-PHresults2("40 to 64", 36, ">36 months")
+e<-PHresults("65+", 0, 12, "0 to 12 months")
+f<-PHresults("65+", 12, 24, ">12 to 24 months")
+g<-PHresults("65+", 24, 36, ">24 to 36 months")
+h<-PHresults2("65+", 36, ">36 months")
+
+#assessing for 0 to 14 that was marginally significant
+i<-PHresults("0 to 14", 0, 12, "0 to 12 months")
+j<-PHresults("0 to 14", 12, 24, ">12 to 24 months")
+k<-PHresults("0 to 14", 24, 36, ">24 to 36 months")
+l<-PHresults2("0 to 14", 36, ">36 months")
+
+Sup_table4a<-rbind(i,j,k,l)
+
+Sup_table4<-rbind(a,b,c,d,e,f,g,h)
+
+Sup_table4$Volume_category<-ifelse(Sup_table4$Volume_category=="vol_ptile<=70", 0, 
+                            ifelse(Sup_table4$Volume_category=="vol_ptile>70-80", 1, 
+                            ifelse(Sup_table4$Volume_category=="vol_ptile>80-90", 2, 
+                            ifelse(Sup_table4$Volume_category=="vol_ptile>90-95",3, 
+                            ifelse(Sup_table4$Volume_category=="vol_ptile>95",4,NA)))))
+
+Sup_table4$Volume_category<-factor(Sup_table4$Volume_category, levels=c(0:4), 
+                                   labels=c("<=70 (ref.)", 
+                                            ">70-80",
+                                            ">80-90", 
+                                            ">90-95",
+                                            ">95"))
+
+Sup_table4$agegroup<-ifelse(Sup_table4$agegroup=="40 to 64", 0,
+                 ifelse(Sup_table4$agegroup=="65+", 1, NA))
+Sup_table4$agegroup<-factor(Sup_table4$agegroup, levels=c(0:1), labels=c("40 to 64 years","65+ years"))
+
+Sup_table4$time<-ifelse(Sup_table4$time=="0 to 12 months", 0,
+             ifelse(Sup_table4$time==">12 to 24 months", 1,
+             ifelse(Sup_table4$time==">24 to 36 months", 2,
+             ifelse(Sup_table4$time==">36 months", 3, NA))))
+Sup_table4$time<-factor(Sup_table4$time, levels=c(0:3), labels=c("0 to 12 months",">12 to 24 months", ">24 to 36 months",">36 months"))
+
+#Plot HRs in 1 year intervals for 40-64 and 65+ for each volume quartile
+Sup_table4 %>%
+  group_by(time, agegroup) %>%
+  ggplot() +
+  geom_point(aes(y=HR, x=Volume_category,  color=`Volume_category`)) + 
+  scale_color_manual(values=c("black", "blue", "green", "red", "orange"), name="", labels=c("<=70 (ref.)", ">70-80",">80-90", ">90-95", ">95")) + 
+  geom_hline(yintercept =1, linetype=2) +
+  theme(axis.text.y=element_blank()) +
+  geom_errorbar(aes(y=HR, x=Volume_category, ymax = `2.5 %`, ymin = `97.5 %`), height = 0.1) +
+  theme_bw() +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    legend.position = "none",
+    axis.title.x = element_text(face="bold"),
+    axis.title.y = element_text(face="bold"),
+    axis.text.x = element_text(size = 11),
+    axis.text.y = element_text(size = 11)) +
+  xlab("Volume category") +
+  coord_flip()  +
+  facet_wrap(~time + agegroup, nrow=4, ncol=2) +
+  theme(strip.placement = "inside", legend.position = "bottom",  strip.text = element_text(size = 12, face="bold"), strip.background = element_rect(fill="lightgray"), legend.text=element_text(size=12, face="bold"))
+
+ggsave("Sup Figure 6.pdf", width=11, height=8.5)
+```
+
+# Validation and n's
+```{r}
+#0 to 12 months
+  x<-exclude3 %>%
+  filter(age_cat=="40 to 64" & DX_LASTCONTACT_DEATH_MONTHS>=0)
+  x <- x %>%
+  mutate(surv=if_else(DX_LASTCONTACT_DEATH_MONTHS<12, DX_LASTCONTACT_DEATH_MONTHS, 12)) %>%
+  mutate(dead=if_else((surv<12) & dead==1, 1, 0))
+  m<-coxph(Surv(surv, dead)~vol_ptile + Race_cat2 + AGE + educ +income +insurance + sex + CNStype + cluster(PUF_FACILITY_ID), x)
+  summary(m)
+  n<-as.data.frame(exp(cbind(HR = coef(m), confint(m)))) #calculate HRs and 95% CIs
+  n<-n[c(1,2,3),]
+  n %>%
+    rownames_to_column() %>%
+    rename(Volume_category=rowname)%>%
+    mutate(agegroup="65+", `time interval`="0 to 12") %>%
+    add_row(Volume_category="vol_ptileQ1", HR=1.0, `2.5 %`=NA, `97.5 %`=NA, agegroup="65+", `time interval`="0 to 12", .before=1)
+ #check n's for paper
+table(x$dead)
+prop.table(table(x$dead))
+
+#>36
+ x<-exclude3 %>%
+  filter(age_cat=="40 to 64" & DX_LASTCONTACT_DEATH_MONTHS>36)
+  m<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + cluster(PUF_FACILITY_ID), x)
+  n<-as.data.frame(exp(cbind(HR = coef(m), confint(m)))) #calculate HRs and 95% CIs
+  n<-n[c(1,2,3),]
+  
+#40 to 64 0-12, 12-24, 24-36 and >=36 validated
+
+#check n's for paper
+
+```
+
+#RUN above for major tumor types with inverse patterns
+```{r}
+PHresults<-function(age_catf, t, survt, t2, tumortype){
+  x<-exclude3 %>%
+  filter(age_cat==age_catf & DX_LASTCONTACT_DEATH_MONTHS>=t) %>%
+  filter(CNStype==tumortype)
+  x <- x %>%
+  mutate(surv=if_else(DX_LASTCONTACT_DEATH_MONTHS<survt, DX_LASTCONTACT_DEATH_MONTHS, survt)) %>%
+  mutate(dead=if_else((surv<survt) & dead==1, 1, 0))
+  m<-coxph(Surv(surv, dead)~vol_ptile + AGE + Race_cat2 + educ +income +insurance + sex + cluster(PUF_FACILITY_ID), x)
+  n<-as.data.frame(exp(cbind(HR = coef(m), confint(m)))) #calculate HRs and 95% CIs
+  n<-n[c(1,2,3,4),]
+  n %>%
+    rownames_to_column() %>%
+    rename(Volume_category=rowname)%>%
+    mutate(agegroup=age_catf, time=t2, CNStype=tumortype) %>%
+    add_row(Volume_category="vol_ptile<=70", HR=1.0, `2.5 %`=NA, `97.5 %`=NA, agegroup=age_catf, time=t2, CNStype=tumortype, .before=1)
+}
+
+
+#need sep function for >36
+PHresults2<-function(age_catf, t, t2, tumortype){
+  x<-exclude3 %>%
+  filter(age_cat==age_catf & DX_LASTCONTACT_DEATH_MONTHS>t & CNStype==tumortype)
+  m<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + AGE + Race_cat2 + educ +income +insurance + sex + cluster(PUF_FACILITY_ID), x)
+  n<-as.data.frame(exp(cbind(HR = coef(m), confint(m)))) #calculate HRs and 95% CIs
+  n<-n[c(1,2,3,4),]
+  n %>%
+    rownames_to_column() %>%
+    rename(Volume_category=rowname)%>%
+    mutate(agegroup=age_catf, time=t2, CNStype=tumortype) %>%
+    add_row(Volume_category="vol_ptile<=70", HR=1.0, `2.5 %`=NA, `97.5 %`=NA, agegroup=age_catf, time=t2, CNStype=tumortype, .before=1)
+}
+  
+a<-PHresults("40 to 64", 0, 12, "0 to 12 months", "3.1.2 Glioblastoma and anaplastic astrocytoma")
+b<-PHresults("40 to 64", 12, 24, ">12 to 24 months", "3.1.2 Glioblastoma and anaplastic astrocytoma")
+c<-PHresults("40 to 64", 24, 36, ">24 to 36 months", "3.1.2 Glioblastoma and anaplastic astrocytoma")
+d<-PHresults2("40 to 64", 36, ">36 months", "3.1.2 Glioblastoma and anaplastic astrocytoma")
+e<-PHresults("40 to 64", 0, 12, "0 to 12 months", "3.1.3 Astrocytoma, NOS")
+f<-PHresults("40 to 64", 12, 24, ">12 to 24 months", "3.1.3 Astrocytoma, NOS")
+g<-PHresults("40 to 64", 24, 36, ">24 to 36 months", "3.1.3 Astrocytoma, NOS")
+h<-PHresults2("40 to 64", 36, ">36 months", "3.1.3 Astrocytoma, NOS")
+i<-PHresults("40 to 64", 0, 12, "0 to 12 months", "3.2 Other glioma")
+j<-PHresults("40 to 64", 12, 24, ">12 to 24 months", "3.2 Other glioma")
+k<-PHresults("40 to 64", 24, 36, ">24 to 36 months", "3.2 Other glioma")
+l<-PHresults2("40 to 64", 36, ">36 months", "3.2 Other glioma")
+
+m<-PHresults("65+", 0, 12, "0 to 12 months", "3.1.2 Glioblastoma and anaplastic astrocytoma")
+n<-PHresults("65+", 12, 24, ">12 to 24 months", "3.1.2 Glioblastoma and anaplastic astrocytoma")
+o<-PHresults("65+", 24, 36, ">24 to 36 months", "3.1.2 Glioblastoma and anaplastic astrocytoma")
+p<-PHresults2("65+", 36, ">36 months", "3.1.2 Glioblastoma and anaplastic astrocytoma")
+q<-PHresults("65+", 0, 12, "0 to 12 months", "3.1.3 Astrocytoma, NOS")
+r<-PHresults("65+", 12, 24, ">12 to 24 months", "3.1.3 Astrocytoma, NOS")
+s<-PHresults("65+", 24, 36, ">24 to 36 months", "3.1.3 Astrocytoma, NOS")
+t<-PHresults2("65+", 36, ">36 months", "3.1.3 Astrocytoma, NOS")
+u<-PHresults("65+", 0, 12, "0 to 12 months", "3.2 Other glioma")
+v<-PHresults("65+", 12, 24, ">12 to 24 months", "3.2 Other glioma")
+w<-PHresults("65+", 24, 36, ">24 to 36 months", "3.2 Other glioma")
+x<-PHresults2("65+", 36, ">36 months", "3.2 Other glioma")
+
+```
+
+# Graphs by cancer type
+```{r}
+Sup_table5<-rbind(a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x)
+Sup_table5$Volume_category<-ifelse(Sup_table5$Volume_category=="vol_ptile<=70", 0, 
+                            ifelse(Sup_table5$Volume_category=="vol_ptile>70-80", 1, 
+                            ifelse(Sup_table5$Volume_category=="vol_ptile>80-90", 2, 
+                            ifelse(Sup_table5$Volume_category=="vol_ptile>90-95",3, 
+                            ifelse(Sup_table5$Volume_category=="vol_ptile>95",4,NA)))))
+
+Sup_table5$Volume_category<-factor(Sup_table5$Volume_category, levels=c(0:4), 
+                                   labels=c("<=70 (ref.)", 
+                                            ">70-80",
+                                            ">80-90", 
+                                            ">90-95",
+                                             ">95"))
+
+Sup_table5$agegroup<-ifelse(Sup_table5$agegroup=="40 to 64", 0,
+                 ifelse(Sup_table5$agegroup=="65+", 1, NA))
+Sup_table5$agegroup<-factor(Sup_table5$agegroup, levels=c(0:1), labels=c("40 to 64 years","65+ years"))
+
+Sup_table5$time<-ifelse(Sup_table5$time=="0 to 12 months", 0,
+             ifelse(Sup_table5$time==">12 to 24 months", 1,
+             ifelse(Sup_table5$time==">24 to 36 months", 2,
+             ifelse(Sup_table5$time==">36 months", 3, NA))))
+Sup_table5$time<-factor(Sup_table5$time, levels=c(0:3), labels=c("0 to 12 months",">12 to 24 months", ">24 to 36 months",">36 months"))
+
+PHgraphtype<-function(tumortype, tumortype2){
+  Sup_table5 %>%
+  group_by(agegroup, time) %>%
+  filter(CNStype==tumortype) %>%
+  ggplot() +
+  geom_point(aes(y=HR, x=Volume_category,  color=Volume_category)) + 
+  scale_color_manual(values=c("black", "blue", "green", "red", "orange"), name="", labels=c("<=70 (ref.)", ">70-80",">80-90", ">90-95", ">95")) + 
+  geom_hline(yintercept =1, linetype=2) +
+  theme(axis.text.y=element_blank()) +
+  geom_errorbar(aes(y=HR, x=Volume_category, ymax = `2.5 %`, ymin = `97.5 %`), height = 0.1) +
+  theme_bw() +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    axis.text.x=element_text(size=11),
+    axis.text.y=element_text(size=11),
+    axis.title.x=element_text(size=12, face="bold"),
+    axis.title.y=element_text(size=12, face="bold"))+
+  coord_flip()  +
+  facet_wrap(~time + agegroup, nrow=4, ncol=2) +
+  labs(title = tumortype2, x = "Volume category") + 
+  theme(strip.placement = "inside", legend.position = "bottom",  strip.text = element_text(size = 14, face="bold", color="black"), strip.background = element_rect(fill="lightgray"), plot.title = element_text(face="bold"), legend.text=element_text(size=12, face="bold"))
+}
+
+A<-PHgraphtype("3.1.2 Glioblastoma and anaplastic astrocytoma", "a. 3.1.2 Glioblastoma and anaplastic astrocytoma")
+A
+ggsave("Sup figure 7a.pdf", width=11, height=8.5)
+
+B<-PHgraphtype("3.1.3 Astrocytoma, NOS", "b. 3.1.3 Astrocytoma, NOS")
+B
+ggsave("Sup figure 7b.pdf", width=11, height=8.5)
+C<-PHgraphtype("3.2 Other glioma", "c. 3.2 Other glioma")
+C
+ggsave("Sup figure 7c.pdf", width=11, height=8.5)
+```
+
+# RMST: Univariate difference in survival time over 5 years 
+```{r}
+RMSTmodu<-function(age_catf, list, comp){
+mod <- exclude3 %>%
+  filter(vol_ptile %in% list, age_cat==age_catf) %>%
+  mutate(survt=if_else(DX_LASTCONTACT_DEATH_MONTHS==0, 0.01, DX_LASTCONTACT_DEATH_MONTHS))  %>%
+  mutate(vol_ptile=if_else(vol_ptile %in% c("<=70"), 0, 1)) 
+mod2 <- rmst2(mod$survt, mod$dead, mod$vol_ptile, tau=60)
+mod3<-as.data.frame(mod2$unadjusted.result)
+mod3<-mod3[-c(2, 3), ]
+mod3<-mod3 %>% 
+  mutate(agegroup=age_catf, comparison=comp)
+}
+
+RMSTunct<-function(age_catf, list, comp){
+mod <- exclude3 %>%
+  filter(vol_ptile %in% list, age_cat==age_catf, CNStype=="3.4.1 Medulloblastoma") %>%
+  mutate(survt=if_else(DX_LASTCONTACT_DEATH_MONTHS==0, 0.01, DX_LASTCONTACT_DEATH_MONTHS))  %>%
+  mutate(vol_ptile=if_else(vol_ptile %in% c("<=70"), 0, 1)) 
+mod2 <- rmst2(mod$survt, mod$dead, mod$vol_ptile, tau=60)
+mod3<-as.data.frame(mod2$unadjusted.result)
+mod3<-mod3[-c(2, 3), ]
+mod3<-mod3 %>% 
+  mutate(agegroup=age_catf, comparison=comp)
+}
+
+
+a<-RMSTmodu("0 to 14", c("<=70", ">70-80"), ">70-80 vs. <=70")
+a.1<-RMSTunct("0 to 14", c("<=70", ">70-80"), ">70-80 vs. <=70")
+b<-RMSTmodu("0 to 14", c("<=70", ">80-90"), ">80-90 vs. <=70")
+b.1<-RMSTunct("0 to 14", c("<=70", ">70-80"), ">70-80 vs. <=70")
+c<-RMSTmodu("0 to 14", c("<=70", ">90-95"), ">90-95 vs. <=70")
+c.1 <-RMSTunct("0 to 14", c("<=70", ">90-95"), ">90-95 vs. <=70")
+d<-RMSTmodu("0 to 14", c("<=70", ">95"), ">95 vs. <=70")
+d.1<-RMSTunct("0 to 14", c("<=70", ">95"), ">95 vs. <=70")
+
+e<-RMSTmodu("15 to 39", c("<=70", ">70-80"), ">70-80 vs. <=70")
+f<-RMSTmodu("15 to 39", c("<=70", ">80-90"), ">80-90 vs. <=70")
+g<-RMSTmodu("15 to 39", c("<=70", ">90-95"), ">90-95 vs. <=70")
+h<-RMSTmodu("15 to 39", c("<=70", ">95"), ">95 vs. <=70")
+
+i<-RMSTmodu("40 to 64", c("<=70", ">70-80"), ">70-80 vs. <=70")
+j<-RMSTmodu("40 to 64", c("<=70", ">80-90"), ">80-90 vs. <=70")
+k<-RMSTmodu("40 to 64", c("<=70", ">90-95"), ">90-95 vs. <=70")
+l<-RMSTmodu("40 to 64", c("<=70", ">95"), ">95 vs. <=70")
+
+m<-RMSTmodu("65+", c("<=70", ">70-80"), ">70-80 vs. <=70")
+n<-RMSTmodu("65+", c("<=70", ">80-90"), ">80-90 vs. <=70")
+o<-RMSTmodu("65+", c("<=70", ">90-95"), ">90-95 vs. <=70")
+p<-RMSTmodu("65+", c("<=70", ">95"), ">95 vs. <=70")
+
+Sup_table6<-rbind(a,b,c,d,e,f,g,h,i,j,k,l, m, n,o,p)
+Sup_table6$p<-round(Sup_table6$p, 4)
+```
+
+#Adjusted RMST
+```{r}
+#Assign the covariates: ignore the first dummy variable
+#This will let the first group as the reference 
+exclude3$sext<-ifelse(exclude3$SEX==1, 0, 1)
+exclude3$Race_cat2t<-ifelse(exclude3$Race_cat2 %in% c("White"), 0, 
+                            ifelse(exclude3$Race_cat2 %in% c("Black"), 1,
+                                   ifelse(exclude3$Race_cat2 %in% c("Asian or Pacific Islander"), 2,
+                                          ifelse(exclude3$Race_cat2 %in% c("American Indian/Alaskan Native", "Other"), 3, NA))))
+
+exclude3$Race_cat2t<-factor(exclude3$Race_cat2t)
+exclude3$incomet<-factor(exclude3$income)
+exclude3$educt<-factor(exclude3$educ)
+exclude3$insurancet<-factor(exclude3$insurance)
+exclude3$CNStypet<-factor(exclude3$CNStype)
+
+exclude3 <- createDummyFeatures(exclude3, cols = "Race_cat2t")
+exclude3 <- createDummyFeatures(exclude3, cols = "incomet")
+exclude3 <- createDummyFeatures(exclude3, cols = "educt")
+exclude3 <- createDummyFeatures(exclude3, cols = "insurancet")
+exclude3 <- createDummyFeatures(exclude3, cols = "CNStypet")
+dput(names(exclude3))
+table(exclude3$Race_cat2t)
+covar <- c("AGE", "sext",  "Race_cat2t.1", "Race_cat2t.2", "Race_cat2t.3", "incomet.Income.Q2", "incomet.Income.Q3", "incomet.Income.Q4", "educt.Education.Q2", "educt.Education.Q3", "educt.Education.Q4", "insurancet.Private.Insurance.Managed.Care", "insurancet.Medicaid", "insurancet.Medicare", "insurancet.Other.Government", "CNStypet.3.1.2.Glioblastoma.and.anaplastic.astrocytoma", 
+"CNStypet.3.1.3.Astrocytoma..NOS", "CNStypet.3.2.Other.glioma", 
+"CNStypet.3.3.Ependymoma", "CNStypet.3.4.1.Medulloblastoma", 
+"CNStypet.3.4.2.Supratentorial.PNET", "CNStypet.3.5.Other.specified.intracranial.and.intraspinal.neoplasms", 
+"CNStypet.3.6.Unspecified.intracranial.and.intraspinal.neoplasms")
+
+RMSTmod<-function(age_catf, list, comp){
+mod <- exclude3 %>%
+  filter(vol_ptile %in% list, age_cat==age_catf) %>%
+  mutate(survt=if_else(DX_LASTCONTACT_DEATH_MONTHS==0, 0.01, DX_LASTCONTACT_DEATH_MONTHS))  %>%
+  mutate(vol_ptile=if_else(vol_ptile %in% c("<=70"), 0, 1)) 
+mod2 <<- rmst2(mod$survt, mod$dead, mod$vol_ptile, tau=60, mod[,covar])
+mod3<-as.data.frame(mod2$adjusted.result)
+mod3<-mod3[-c(2, 3), ]
+mod3<-mod3 %>% 
+  mutate(agegroup=age_catf, comparison=comp)
+}
+
+test<-exclude3%>%
+filter(age_cat=="0 to 14")
+table(test$CNStype)
+
+a<-RMSTmod("0 to 14", c("<=70", ">70-80"), ">70-80 vs. <=70") 
+b<-RMSTmod("0 to 14", c("<=70", ">80-90"), ">80-90 vs. <=70") 
+c<-RMSTmod("0 to 14", c("<=70", ">90-95"), ">90-95 vs. <=70")
+d<-RMSTmod("0 to 14", c("<=70", ">95"), ">95 vs. <=70")
+
+e<-RMSTmod("15 to 39", c("<=70", ">70-80"), ">70-80 vs. <=70")
+f<-RMSTmod("15 to 39", c("<=70", ">80-90"), ">80-90 vs. <=70")
+g<-RMSTmod("15 to 39", c("<=70", ">90-95"), ">90-95 vs. <=70")
+h<-RMSTmod("15 to 39", c("<=70", ">95"), ">95 vs. <=70")
+
+i<-RMSTmod("40 to 64", c("<=70", ">70-80"), ">70-80 vs. <=70")
+j<-RMSTmod("40 to 64", c("<=70", ">80-90"), ">80-90 vs. <=70")
+k<-RMSTmod("40 to 64", c("<=70", ">90-95"), ">90-95 vs. <=70")
+l<-RMSTmod("40 to 64", c("<=70", ">95"), ">95 vs. <=70")
+
+m<-RMSTmod("65+", c("<=70", ">70-80"), ">70-80 vs. <=70")
+n<-RMSTmod("65+", c("<=70", ">80-90"), ">80-90 vs. <=70")
+o<-RMSTmod("65+", c("<=70", ">90-95"), ">90-95 vs. <=70")
+p<-RMSTmod("65+", c("<=70", ">95"), ">95 vs. <=70")
+
+table3<-rbind(a,b,c,d,e,f,g,h,i, j, k, l, m,n,o,p)
+table3$p<-round(table3$p, 4)
+```
+
+# RMST by cancer type (data too sparse for some cancer types--doesn't work)
+```{r}
+can_all<-data.frame(matrix(ncol=7, nrow=0))
+colnames(can_all) <-c('Est.', 'lower .95', 'upper .95', 'p', 'agegroup', 'comparison', 'cantype')
+
+covar <- c("AGE", "sext",  "Race_cat2t.1", "Race_cat2t.2", "Race_cat2t.3", "incomet.Income.Q2", "incomet.Income.Q3", "incomet.Income.Q4", "educt.Education.Q2", "educt.Education.Q3", "educt.Education.Q4", "insurancet.Private.Insurance.Managed.Care", "insurancet.Medicaid", "insurancet.Medicare", "insurancet.Other.Government")
+
+cantypes14<-c("3.1.1 Specified low-grade astrocytic tumors", "3.1.2 Glioblastoma and anaplastic astrocytoma", "3.1.3 Astrocytoma, NOS", "3.2 Other glioma", "3.3 Ependymoma", "3.4.1 Medulloblastoma", "3.4.2 Supratentorial PNET")
+#"3.6 Unspecified intracranial and intraspinal neoplasms" #"3.5 Other specified intracranial and intraspinal neoplasms"
+#(did not work except for highest institution)
+
+cantypes39<-c("3.1.1 Specified low-grade astrocytic tumors", "3.1.2 Glioblastoma and anaplastic astrocytoma", 
+"3.1.3 Astrocytoma, NOS", "3.2 Other glioma", "3.3 Ependymoma", "3.4.1 Medulloblastoma", "3.4.2 Supratentorial PNET", "3.5 Other specified intracranial and intraspinal neoplasms")
+#"3.6 Unspecified intracranial and intraspinal neoplasms" doesn't work
+
+cantypes64<-c("3.1.1 Specified low-grade astrocytic tumors", "3.1.2 Glioblastoma and anaplastic astrocytoma", "3.1.3 Astrocytoma, NOS", "3.2 Other glioma", "3.3 Ependymoma", "3.5 Other specified intracranial and intraspinal neoplasms", "3.6 Unspecified intracranial and intraspinal neoplasms")
+#"3.4.1 Medulloblastoma", "3.4.2 Supratentorial PNET"
+#
+cantypes65<-c("3.1.2 Glioblastoma and anaplastic astrocytoma", "3.1.3 Astrocytoma, NOS", "3.2 Other glioma", 
+ "3.6 Unspecified intracranial and intraspinal neoplasms")
+#"3.1.1 Specified low-grade astrocytic tumors","3.3 Ependymoma", "3.5 Other specified intracranial and intraspinal neoplasms",
+RMSTmod<-function(age_catf, list, comp, cantypes){
+ for (i in cantypes) {
+mod <- exclude3 %>%
+  filter(vol_ptile %in% list, age_cat==age_catf, CNStype==i) %>% 
+  mutate(survt=if_else(DX_LASTCONTACT_DEATH_MONTHS==0, 0.01, DX_LASTCONTACT_DEATH_MONTHS))  %>%
+  mutate(vol_ptile=if_else(vol_ptile %in% c("<=70"), 0, 1))
+mod2 <- rmst2(mod$survt, mod$dead, mod$vol_ptile, tau=60, mod[,covar])
+mod3<-as.data.frame(mod2$adjusted.result)
+mod3<-mod3[-c(2, 3), ]
+mod3<-mod3 %>% 
+  mutate(agegroup=age_catf, comparison=comp, cantype=i)
+can_all<-rbind(can_all, mod3)
+  }
+return(can_all)
+}
+
+#Need to run the rest and merge all
+m<-RMSTmod("0 to 14", c("<=70", ">70-80"), ">70-80 vs. <=70", cantypes14)
+n<-RMSTmod("0 to 14", c("<=70", ">80-90"), ">80-90 vs. <=70", cantypes14)
+o<-RMSTmod("0 to 14", c("<=70", ">90-95"), ">90-95 vs. <=70", cantypes14)
+p<-RMSTmod("0 to 14", c("<=70", ">95"), ">95 vs. <=70", cantypes14)
+#all types work for 0-14 except 3.5 and 3.6
+
+
+#15 to 39
+q<-RMSTmod("15 to 39", c("<=70", ">70-80"), ">70-80 vs. <=70", cantypes39)
+r<-RMSTmod("15 to 39", c("<=70", ">80-90"), ">80-90 vs. <=70", cantypes39)
+s<-RMSTmod("15 to 39", c("<=70", ">90-95"), ">90-95 vs. <=70", cantypes39)
+t<-RMSTmod("15 to 39", c("<=70", ">95"), ">95 vs. <=70", cantypes39)
+#all types work except 3.6
+
+#40-64
+u<-RMSTmod("40 to 64", c("<=70", ">70-80"), ">70-80 vs. <=70", cantypes64)
+v<-RMSTmod("40 to 64", c("<=70", ">80-90"), ">80-90 vs. <=70", cantypes64)
+w<-RMSTmod("40 to 64", c("<=70", ">90-95"), ">90-95 vs. <=70", cantypes64)
+x<-RMSTmod("40 to 64", c("<=70", ">95"), ">95 vs. <=70", cantypes64)
+#removed 3.4.1 and 3.4.2 <200 cases
+
+#65+
+y<-RMSTmod("65+", c("<=70", ">70-80"), ">70-80 vs. <=70", cantypes65)
+z<-RMSTmod("65+", c("<=70", ">80-90"), ">80-90 vs. <=70", cantypes65)
+aa<-RMSTmod("65+", c("<=70", ">90-95"), ">90-95 vs. <=70", cantypes65)
+bb<-RMSTmod("65+", c("<=70", ">95"), ">95 vs. <=70", cantypes65)
+
+Sup_table7<-rbind(m,n,o,p,q,r,s,t,u,v,w,x, y,z, aa,bb)
+Sup_table7$agegroup<-ifelse(Sup_table7$agegroup=="65+", "65+", Sup_table7$agegroup)
+Sup_table7 <- Sup_table7[order(Sup_table7$agegroup, Sup_table7$cantype, Sup_table7$comparison),]
+Sup_table7$p<-round(Sup_table7$p, 4)
+Sup_table7<- rename(Sup_table7, 
+                    Comparison=comparison,
+                    `RMST difference (months)` = Est.)
+
+table(exclude3$CNStype, exclude3$age_cat)
+
+
+RMSTplot<-function(cantypef, cantypef2){
+  Sup_table7 %>%
+    group_by(agegroup)%>%
+  filter(cantype==cantypef) %>%
+  ggplot() +
+  geom_point(aes(y=`RMST difference (months)`, x=Comparison, color=Comparison)) +
+  geom_hline(yintercept =0, linetype=1, color="gray") +
+  theme(axis.text.y=element_blank()) +
+  geom_errorbar(aes(y=`RMST difference (months)`, x=Comparison, ymax = `upper .95`, ymin = `lower .95`), width=0.4,
+                  height=0.1, size=0.4) +
+    scale_color_discrete(name="")+
+  theme_bw() +
+    coord_flip()  +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    axis.title.x = element_text(size=10, face="bold"),
+    axis.title.y = element_text(size=10, face="bold"))+
+    facet_wrap(facets = vars(agegroup), ncol=2) +
+  labs(title = cantypef2) + 
+  theme(strip.placement = "inside", legend.position = "bottom",  strip.text = element_text(size = 8, face="bold", color="black"), plot.title = element_text(size = 10, face="bold"), strip.background = element_rect(fill="lightgray"), legend.text=element_text(size=10, face="bold"))
+}
+
+A<-RMSTplot("3.1.1 Specified low-grade astrocytic tumors", "a. 3.1.1 Specified low-grade \n astrocytic tumors")
+A
+
+B<-RMSTplot("3.1.2 Glioblastoma and anaplastic astrocytoma", "b. 3.1.2 Glioblastoma and \n anaplastic astrocytoma")
+B
+
+C<-RMSTplot("3.1.3 Astrocytoma, NOS", "c. 3.1.3 Astrocytoma, NOS")
+C
+
+D<-RMSTplot("3.2 Other glioma", "d. 3.2 Other glioma")
+D
+
+E<-RMSTplot("3.3 Ependymoma", "e. 3.3 Ependymoma")
+E
+
+F<-RMSTplot("3.4.1 Medulloblastoma", "f. 3.4.1 Medulloblastoma")
+F
+
+G<-RMSTplot("3.4.2 Supratentorial PNET", "g. 3.4.2 Supratentorial PNET")
+G
+
+H<-RMSTplot("3.5 Other specified intracranial and intraspinal neoplasms", "h. 3.5 Other specified intracranial and \n intraspinal neoplasms")
+H
+
+I<-RMSTplot("3.6 Unspecified intracranial and intraspinal neoplasms", "i. 3.6 Unspecified intracranial and \n intraspinal neoplasms")
+I
+pdf("Sup Figure 8.pdf", width=11, height=10, paper="USr")
+A + B + C+ D+ E + F + G + H + I + plot_layout(ncol=3, nrow=3, guides='collect') &
+  theme(legend.position='bottom')
+dev.off()
+```
+
+# Treatment differences by facilty volume (logistic)
+
+# Logistic--handling correlated data using multi-level modelling.  (https://towardsdatascience.com/using-regression-with-correlated-data-5845a2eed3d2)
+```{r}
+x<-exclude3 %>%
+  filter(age_cat=="0 to 14" & Surgery_AF !="Unknown surgery") 
+x$Surgery_AF<-ifelse(x$Surgery_AF=="No surgery", 0, 1)
+
+#testing
+#1. GLM
+mod1<-glm(Surgery_AF ~ vol_ptile, data = x, family="binomial")
+summary(mod1)
+odds.n.ends(mod1)
+
+#2. glmer
+mod2<-glmer(Surgery_AF ~  vol_ptile + (1 | PUF_FACILITY_ID), data = x, family = binomial, glmerControl(optimizer = c("bobyqa")))
+summary(mod2)
+
+#3. glm.cluster
+mod3 <- miceadds::glm.cluster(data=x, Surgery_AF ~ vol_ptile + Race_cat2 + as.factor(age_cat2) + educ +income +insurance + sex   + CNStype, cluster="PUF_FACILITY_ID", family="binomial")
+y<-summary(mod3)
+y<-as.data.frame(y)
+table(exclude3$Surgery_AF)
+
+#write function for all to run, also run vol as continuous for ptrend
+Treat2<-function(depvar, age_catf, exclusion, trt, var_name){
+  x<<-exclude3 %>%
+  mutate(y={{depvar}}) %>%
+  filter(age_cat==age_catf & y!=exclusion)
+  mod3 <- miceadds::glm.cluster(data=x, y ~ vol_ptile + Race_cat2 + as.factor(age_cat2) + educ +income +insurance +  sex  + CNStype, cluster="PUF_FACILITY_ID", family="binomial")
+  
+  #Volume as continuous
+  mod4<- miceadds::glm.cluster(data=x, y ~ CNS_VOL + Race_cat2 + as.factor(age_cat2) + educ +income +insurance +  sex  + CNStype, cluster="PUF_FACILITY_ID", family="binomial")
+
+  w<<-as.data.frame(summary(mod4))
+  w<-w[-c(1, 3:28),]
+  w$ptrend<-w$`Pr(>|z|)`
+
+x<-as.data.frame(summary(mod3))
+x<-x[-c(1, 6:31),]
+x <-x %>%rownames_to_column() %>%
+    rename(Volume_category=rowname)%>%
+    mutate(agegroup=age_catf, Treatment=trt, Var_name=var_name)%>%
+  mutate(OR=exp(Estimate), lowCI=exp(Estimate-1.96*`Std. Error`), highCI=exp(Estimate+1.96*`Std. Error`)) %>%
+select(-Estimate, -`Std. Error`, -`z value`)
+ptrend<-w$ptrend
+x$ptrend<-ptrend
+x <- x[, c(1, 6, 7, 8, 2,3,4,5,9)]
+}
+
+a<-Treat2(Surgery_AF, "0 to 14", "Unknown Surgery", "Surgery", "Surgery any facility")
+b<-Treat2(Surgery_AF, "15 to 39", "Unknown Surgery", "Surgery", "Surgery any facility")
+c<-Treat2(Surgery_AF, "40 to 64", "Unknown Surgery", "Surgery", "Surgery any facility")
+d<-Treat2(Surgery_AF, "65+", "Unknown Surgery", "Surgery", "Surgery any facility")
+
+e<-Treat2(Rad_AF, "0 to 14", "Unknown radiation", "Radiation", "Radiation any facility")
+f<-Treat2(Rad_AF, "15 to 39", "Unknown radiation", "Radiation", "Radiation any facility")
+g<-Treat2(Rad_AF, "40 to 64", "Unknown radiation", "Radiation", "Radiation any facility")
+h<-Treat2(Rad_AF, "65+", "Unknown radiation", "Radiation", "Radiation any facility")
+
+i<-Treat2(Chemo_AF, "0 to 14", "Unknown chemotherapy", "Chemotherapy", "Chemotherapy any facility")
+j<-Treat2(Chemo_AF, "15 to 39", "Unknown chemotherapy", "Chemotherapy", "Chemotherapy any facility")
+k<-Treat2(Chemo_AF, "40 to 64", "Unknown chemotherapy", "Chemotherapy", "Chemotherapy any facility")
+l<-Treat2(Chemo_AF, "65+", "Unknown chemotherapy", "Chemotherapy", "Chemotherapy any facility")
+
+Sup_table8<-rbind(a,b,c,d,e,f,g,h,i,j,k,l)
+Sup_table8<-Sup_table8 %>%
+  rename(lowerCI=3, upperCI=4)
+
+# Plot these results
+logistic<-Sup_table8 %>%
+    group_by(agegroup) %>%
+  filter(Treatment=="Chemotherapy") %>%
+  ggplot() +
+  geom_point(aes(y=`OR`, x=Volume_category, color=Volume_category)) +
+  geom_errorbar(aes(y=`OR`, x=Volume_category, ymax = `upperCI`, ymin = `lowerCI`), width=0.4,
+                  height=0.1, size=0.4) +
+  geom_hline(yintercept =1.0, linetype=1, color="gray") +
+  theme(axis.text.y=element_blank()) +
+  
+  theme_bw() +
+    coord_flip()  +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank())  +
+    facet_wrap(facets = vars(agegroup), ncol=2) +
+  theme(strip.placement = "inside", legend.position = "bottom",  strip.text = element_text(size = 7, face="bold", color="black"),
+        plot.title = element_text(size = 10, face="bold"), strip.background = element_rect(fill="lightgray"))
+
+logistic
+
+
+```
+
+
+
+# Check Cox models for effect modification by year of dx
+```{r}
+table(exclude3$YEAR_OF_DIAGNOSIS)
+#Cox models for race interaction
+#divide year of dx into binary category
+exclude3 <-exclude3 %>%
+  mutate(yeardx_cat=case_when(YEAR_OF_DIAGNOSIS %in% c(2004, 2005, 2006, 2007, 2008, 2009) ~0,
+                              YEAR_OF_DIAGNOSIS %in% c(2010, 2011, 2012, 2013, 2014, 2015, 2016) ~1))
+
+exclude3$yeardx_cat<-factor(exclude3$yeardx_cat, levels=c(0:1), labels=c("2004 to 2009", "2010 to 2016"))
+table(exclude3$yeardx_cat)
+
+CoxAgeAdj<-function(age_catf){
+  x<<-exclude3 %>%
+  filter(age_cat==age_catf) 
+  mod1<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + yeardx_cat + cluster(PUF_FACILITY_ID), x)
+  mod2<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + yeardx_cat*vol_ptile + cluster(PUF_FACILITY_ID), x)
+  lrtest(mod1, mod2)%>%
+   mutate(agegroup=age_catf,
+          interaction="Year dx category")
+}
+
+e<-CoxAgeAdj("0 to 14")
+f<-CoxAgeAdj("15 to 39") 
+g<-CoxAgeAdj("40 to 64")
+h<-CoxAgeAdj("65+")
+
+#Stratify by year category
+CoxAgeAdj<-function(age_catf, yeardx_catf){
+  x<-exclude3 %>%
+  filter(age_cat==age_catf, yeardx_cat==yeardx_catf) 
+  mod1<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + cluster(PUF_FACILITY_ID), x)
+  mod2<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + AGE + Race_cat2 + educ +income +insurance + sex + CNStype +cluster(PUF_FACILITY_ID), x)
+  y<-as.data.frame(exp(cbind(HR = coef(mod1), confint(mod1))))
+  y<-y[c(1,2,3,4),]
+  y<-y %>%
+    rownames_to_column() %>%
+    rename(Volume_category=rowname)%>%
+    mutate(agegroup=age_catf) %>%
+    mutate(year_category=yeardx_catf)
+}
+
+
+i<-CoxAgeAdj("0 to 14", "2004 to 2009")
+j<-CoxAgeAdj("0 to 14", "2010 to 2016")
+k<-CoxAgeAdj("65+", "2004 to 2009")
+l<-CoxAgeAdj("65+", "2010 to 2016")
+
+Sup_table9<-rbind(i,j,k,l)
+
+write.xlsx(Sup_table8, file="Sup_table8.xlsx", keepNA=TRUE, overwrite=TRUE)
+```
+
+# Rerun excluding those who died in the first six months
+```{r}
+exclude4<-exclude3 %>%
+  filter(DX_LASTCONTACT_DEATH_MONTHS > 6)
+CoxAgeAdj<-function(age_catf){
+  x<-exclude4 %>%
+  filter(age_cat==age_catf) 
+  mod1<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + cluster(PUF_FACILITY_ID), x)
+}
+
+e<-CoxAgeAdj("0 to 14")
+summary(e)
+f<-CoxAgeAdj("15 to 39") 
+summary(f)
+g<-CoxAgeAdj("40 to 64")
+summary(g)
+h<-CoxAgeAdj("65+")
+summary(h)
+```
+
+
+# All surgery at reporting facility comparison by volume quartile
+```{r}
+exclude5<-exclude3 %>%
+  filter(RX_HOSP_SURG_PRIM_SITE >=10 & RX_HOSP_CHEMO <99)
+CoxAgeAdj<-function(age_catf){
+  x<-exclude5 %>%
+  filter(age_cat==age_catf) 
+  mod1<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + cluster(PUF_FACILITY_ID) , x)
+}
+
+e<-CoxAgeAdj("0 to 14")
+summary(e)
+f<-CoxAgeAdj("15 to 39") 
+summary(f)
+g<-CoxAgeAdj("40 to 64")
+summary(g)
+h<-CoxAgeAdj("65+")
+summary(h)
+```
+
+# Cox models that account for clustering of patients in hospitals (models random effect separately), Not used
+```{r}
+#R code for Cox model with random coefficients (effect of shock varies across hospitals)
+CoxRandom<-exclude3 %>%
+  filter(age_cat=="0 to 14") 
+
+mod1<-coxme(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~1 + (1|PUF_FACILITY_ID), ties="efron", CoxRandom)
+summary(mod1)
+summary(exclude3$DX_LASTCONTACT_DEATH_MONTHS)
+
+Model.frailty.gamma <- coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead) ~ vol_ptile + AGE  + Race_cat2 + educ +income +insurance + sex + CNStype + frailty(PUF_FACILITY_ID, distribution="gamma"), data=CoxRandom)
+summary(Model.frailty.gamma)
+
+Model.cluster <- coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead) ~ vol_ptile + AGE  + Race_cat2 + educ +income +insurance + sex + CNStype + cluster(PUF_FACILITY_ID), data=CoxRandom)
+summary(Model.cluster)
+```
+
+#look at patients per year by facility volume quartile
+```{r}
+#make dataset with unique Facility ids for PEDS and adults
+#Correct units for kids since it was not divided by year number above
+
+PPY<-exclude3 %>%
+  select(PUF_FACILITY_ID, CNS_VOL_flag, vol_ptile, CNS_VOL) %>%
+  group_by(CNS_VOL_flag, vol_ptile) %>%
+  distinct(PUF_FACILITY_ID, .keep_all = TRUE) %>%
+  summarise(mean=mean(CNS_VOL), min=min(CNS_VOL), max=max(CNS_VOL))
+```
+
+# Clean up tables to provide consistent column naming and for supplement
+```{r}
+table2<-table2 %>%
+  rename(lowerCI=3, upperCI=4)
+table3<-table3 %>%
+  rename(lowerCI=2, upperCI=3)
+Sup_table2<-Sup_table2 %>%
+  rename(lowerCI=3, upperCI=4)%>%
+  select(-CNS.type)
+Sup_table4<-Sup_table4 %>%
+  rename(lowerCI=3, upperCI=4) %>%
+  select(-`time interval`)
+Sup_table5<-Sup_table5 %>%
+  rename(lowerCI=3, upperCI=4)
+Sup_table6<-Sup_table6%>%
+  rename(lowerCI=2, upperCI=3)
+Sup_table7<-Sup_table7 %>%
+  rename(lowerCI=2, upperCI=3)
+Sup_table8<-Sup_table8 %>%
+  select(-Var_name)
+Sup_table9<-Sup_table9 %>%
+  rename(lowerCI=3, upperCI=4)
+```
+
+# Create excel workbook with files
+```{r}
+sheets<-list("Table2 (overall CPH)" = table2, 
+             "Table3 (adjusted RMST)" = table3, 
+             "Sup Table1 (EM tests)" = Sup_table1, 
+             "Sup Table2 (cancer type CPH)" = Sup_table2, 
+             "Sup Table3 (PH tests)" = Sup_table3, 
+             "Sup Table4 (PH int)" = Sup_table4, 
+             "Sup Table5 (PH int cantype)" = Sup_table5,
+             "Sup Table6 (RMST unadj)" = Sup_table6,
+             "Sup Table7 (RMST adj by type)" = Sup_table7,
+             "Sup Table8 (Treatment)" = Sup_table8,
+             "Sup Table9 (Year modification)" = Sup_table9)
+write.xlsx(sheets, file="analysis_tables.xlsx", keepNA=TRUE, overwrite=TRUE)
+```
+
+# Determining cases by age group and facility volume category and vital status
+```{r}
+peds<-exclude3 %>%
+  select(CNS_VOL_flag, vol_ptile, dead2, CNStype, Race_cat2, educ, insurance, income) %>%
+  group_by(CNStype, vol_ptile, dead2, Race_cat2, educ, insurance, income) %>%
+  filter(CNS_VOL_flag=="peds", CNStype=="3.4.1 Medulloblastoma") %>%
+  count()
+
+test<-exclude3 %>%
+  filter(age_cat=="65+")
+table(exclude3$CNS_VOL_flag, exclude3$CNStype)
+table(test$CNStype, test$GRADE)
+
+table(exclude3$age_cat)
+```
