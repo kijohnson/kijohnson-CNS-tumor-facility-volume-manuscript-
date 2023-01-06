@@ -4,9 +4,8 @@ author: "Kim Johnson"
 date: "7/30/2021"
 output: html_document
 ---
-# load libraries
+# install packages and load libraries
 ```{r}
-#install.packages("pacman")
 pacman::p_load(readr, haven, arsenal, survival, table1, dplyr, tidyr, lmtest, tidyverse, openxlsx, DiagrammeR, survRM2, magrittr, mlr, geepack, odds.n.ends, miceadds, sandwich, coxme, lme4, patchwork, ggbreak, RColorBrewer, ggpubr, survminer)
 ```
 
@@ -18,16 +17,14 @@ FVA_BRAIN<-read_sas("ncdb_Brain.sas7bdat")
 
 FVA_CNS2<-rbind(FVA_CNS, FVA_BRAIN)
 
-#select variables
+# select variables
 FVA_CNS2<-FVA_CNS2 %>%
   select(PUF_CASE_ID, AGE, SEX, RACE, CLASS_OF_CASE, SPANISH_HISPANIC_ORIGIN, INSURANCE_STATUS,  YEAR_OF_DIAGNOSIS, NO_HSD_QUAR_00, NO_HSD_QUAR_12, NO_HSD_QUAR_2016, MED_INC_QUAR_00, MED_INC_QUAR_12, MED_INC_QUAR_2016, PRIMARY_SITE, HISTOLOGY, PUF_VITAL_STATUS, PUF_FACILITY_ID, SEQUENCE_NUMBER, PUF_MULT_SOURCE, FACILITY_TYPE_CD, DX_LASTCONTACT_DEATH_MONTHS, RX_SUMM_SURG_PRIM_SITE, RX_HOSP_SURG_PRIM_SITE, RAD_LOCATION_OF_RX, RX_SUMM_CHEMO, RX_HOSP_CHEMO, RX_HOSP_HORMONE, RX_HOSP_IMMUNOTHERAPY, RX_SUMM_OTHER, GRADE)
-
-table(FVA_CNS2$GRADE)
 ```
 
 # Data management
 ```{r}
-#make age groups
+# make age groups
 FVA_CNS2$age_cat<-ifelse(FVA_CNS2$AGE<15, 0,
                          ifelse(FVA_CNS2$AGE>=15 & FVA_CNS2$AGE<=39, 1,
                          ifelse(FVA_CNS2$AGE>39 & FVA_CNS2$AGE<65,2,
@@ -40,7 +37,7 @@ FVA_CNS2$age_cat<-factor(FVA_CNS2$age_cat, levels=c(0:3),
                                   "65+"))
 table(FVA_CNS2$age_cat, useNA="always")
 
-#categorized age further
+# categorize age further
 FVA_CNS2$age_cat2<-ifelse(FVA_CNS2$AGE<5, 0,
                         ifelse(FVA_CNS2$AGE>=5 & FVA_CNS2$AGE<10, 1,
                         ifelse(FVA_CNS2$AGE>=10 & FVA_CNS2$AGE<=15,2,
@@ -54,18 +51,18 @@ FVA_CNS2$age_cat2<-ifelse(FVA_CNS2$AGE<5, 0,
                         ifelse(FVA_CNS2$AGE >=80, 10,
                                 NA)))))))))))
 
-#recode sex
+# recode sex
 FVA_CNS2$sex<-ifelse(FVA_CNS2$SEX==1,1, #males coded as 1
                      ifelse(FVA_CNS2$SEX==2, 0, NA)) #females coded as 0
 
 FVA_CNS2$sex<- factor(FVA_CNS2$sex, levels=c(1:0),labels=c("Male","Female"))
 table(FVA_CNS2$sex, useNA="always")
 
-#recode race/ethnicity
-#Code for White 1
-#Code for Black 2
-#Code for American Indian/Alaskan Native 3
-#Code for Asian or Pacific Islander >=4 and <98
+# recode race/ethnicity
+# Code for White 1
+# Code for Black 2
+# Code for American Indian/Alaskan Native 3
+# Code for Asian or Pacific Islander >=4 and <98
 FVA_CNS2$Race_cat<-ifelse(FVA_CNS2$RACE==1 & FVA_CNS2$SPANISH_HISPANIC_ORIGIN==0, 0, 
                           ifelse(FVA_CNS2$RACE==2 & FVA_CNS2$SPANISH_HISPANIC_ORIGIN==0, 1, 
                           ifelse(FVA_CNS2$RACE==3 & FVA_CNS2$SPANISH_HISPANIC_ORIGIN==0,2,
@@ -86,22 +83,27 @@ test<-FVA_CNS2 %>%
   filter(SPANISH_HISPANIC_ORIGIN==9)
 table(test$RACE, useNA="always")
 
-#recode race
+# recode race
 FVA_CNS2$Race_cat2<-ifelse(FVA_CNS2$RACE==1, 0, 
                     ifelse(FVA_CNS2$RACE==2, 1, 
                     ifelse(FVA_CNS2$RACE==3, 2,
                     ifelse(FVA_CNS2$RACE>=4 & FVA_CNS2$RACE<98, 3, 
                     ifelse(FVA_CNS2$RACE==98, 4, NA)))))
 
-FVA_CNS2$Race_cat2<- factor(FVA_CNS2$Race_cat2,levels=c(0:4), 
-                            labels=c("White",
-                                     "Black",
-                                     "American Indian/Alaskan Native", 
-                                     "Asian or Pacific Islander", 
-                                     "Other"))
+FVA_CNS2$Race_cat2<- factor(FVA_CNS2$Race_cat2,levels=c(0:4), labels=c("White","Black","American Indian/Alaskan Native", "Asian or Pacific Islander", "Other"))
 table(FVA_CNS2$Race_cat2,  useNA="always")
 
-#label primary payer
+# recode race as white, black, other
+
+FVA_CNS2 <- FVA_CNS2 %>%
+  mutate(Race_cat3 = case_when(Race_cat2 %in% c("Black", "American Indian/Alaskan Native", "Asian or Pacific Islander") ~ 1,
+                               Race_cat2 =="Other" ~2,
+                               Race_cat2=="White" ~ 0))
+
+FVA_CNS2$Race_cat3<- factor(FVA_CNS2$Race_cat3,levels=c(0:2), labels=c("White","Black, American Indian/Alaskan Native, Asian or Pacific Islander", "Other"))
+table(FVA_CNS2$RACE, FVA_CNS2$Race_cat3, useNA = "always")
+
+# label primary payer
 FVA_CNS2$insurance<-factor(FVA_CNS2$INSURANCE_STATUS, levels=c(0:4), 
                            labels=c("Not Insured", 
                                     "Private Insurance/Managed Care", 
@@ -109,7 +111,7 @@ FVA_CNS2$insurance<-factor(FVA_CNS2$INSURANCE_STATUS, levels=c(0:4),
                                     "Other Government"))
 table(FVA_CNS2$insurance, useNA="always")
 
-#education quartiles (This measure of educational attainment for each patient's area of residence is estimated by matching the zip code of the patient recorded at the time of diagnosis against files derived from the 2012 American Community Survey data, spanning years 2000, 2008-2012, and 2012-2016). For individuals diagnosed 2004-2006, use 2000, for those diagnosed 2007-2011, use 2008-2012, for those diagnosed 2012-2017, use 2012-2016
+# education quartiles (This measure of educational attainment for each patient's area of residence is estimated by matching the zip code of the patient recorded at the time of diagnosis against files derived from the 2012 American Community Survey data, spanning years 2000, 2008-2012, and 2012-2016). For individuals diagnosed 2004-2006, use 2000, for those diagnosed 2007-2011, use 2008-2012, for those diagnosed 2012-2017, use 2012-2016
 
 FVA_CNS2<-FVA_CNS2 %>%
   mutate(educ=case_when(YEAR_OF_DIAGNOSIS <2007 & NO_HSD_QUAR_00==1~0,
@@ -132,7 +134,7 @@ FVA_CNS2$educ<-factor(FVA_CNS2$educ, levels=c(0:3),
                                "Education Q4"))
 
 
-#income quartiles  (Median household income for each patient's area of residence is estimated by matching the zip code of the patient recorded at the time of diagnosis against files derived from the  American Community Survey data.)  For individuals diagnosed 2004-2006, use 2000, for those diagnosed 2007-2011, use 2008-2012, for those diagnosed 2012-2017, use 2012-2016.
+# income quartiles  (Median household income for each patient's area of residence is estimated by matching the zip code of the patient recorded at the time of diagnosis against files derived from the  American Community Survey data.)  For individuals diagnosed 2004-2006, use 2000, for those diagnosed 2007-2011, use 2008-2012, for those diagnosed 2012-2017, use 2012-2016.
 
 FVA_CNS2<-FVA_CNS2 %>%
   mutate(income=case_when(YEAR_OF_DIAGNOSIS <2007 & MED_INC_QUAR_00==1~0,
@@ -148,56 +150,44 @@ FVA_CNS2<-FVA_CNS2 %>%
                       YEAR_OF_DIAGNOSIS >=2012 & MED_INC_QUAR_2016==3~2,
                       YEAR_OF_DIAGNOSIS >=2012 & MED_INC_QUAR_2016==4~3))
 
-FVA_CNS2$income<-factor(FVA_CNS2$income, levels=c(0:3), 
-                        labels=c("Income Q1", 
-                                 "Income Q2", 
-                                 "Income Q3", 
-                                 "Income Q4"))
+FVA_CNS2$income<-factor(FVA_CNS2$income, levels=c(0:3), labels=c("Income Q1", "Income Q2","Income Q3","Income Q4"))
 
 table(FVA_CNS2$income, useNA="always")
 
-#Surgery at any facility
+# Surgery at any facility
 FVA_CNS2<-FVA_CNS2 %>%
   mutate(Surgery_AF=case_when(RX_SUMM_SURG_PRIM_SITE==0~0,
                                         RX_SUMM_SURG_PRIM_SITE>=10 & RX_SUMM_SURG_PRIM_SITE<99~1))
 
 
 
-FVA_CNS2$Surgery_AF<-factor(FVA_CNS2$Surgery_AF, levels=c(0:1),
-                            labels=c("No surgery",
-                                     "Surgery"))
+FVA_CNS2$Surgery_AF<-factor(FVA_CNS2$Surgery_AF, levels=c(0:1),labels=c("No surgery","Surgery"))
 
 table(FVA_CNS2$Surgery_AF, useNA = "always")
 
-#Surgery at reporting facility
+# Surgery at reporting facility
 FVA_CNS2<-FVA_CNS2 %>%
   mutate(Surgery_TF=case_when(RX_HOSP_SURG_PRIM_SITE==0~0,
                               RX_HOSP_SURG_PRIM_SITE>=10 & RX_HOSP_SURG_PRIM_SITE<99 ~1))
 
-FVA_CNS2$Surgery_TF<-factor(FVA_CNS2$Surgery_TF, levels=c(0:1),
-                            labels=c("No surgery",
-                                     "Surgery"))
+FVA_CNS2$Surgery_TF<-factor(FVA_CNS2$Surgery_TF, levels=c(0:1), labels=c("No surgery", "Surgery"))
 
 FVA_CNS2<- FVA_CNS2 %>%
   mutate(Rad_AF=case_when(RAD_LOCATION_OF_RX==0 ~0, #no radiation
                              RAD_LOCATION_OF_RX %in% c(1,2,3,4) ~1))#any radiation 
                             
 
-FVA_CNS2$Rad_AF<-factor(FVA_CNS2$Rad_AF, levels=c(0:1),
-                            labels=c("No radiation",
-                                     "Any radiation"))
+FVA_CNS2$Rad_AF<-factor(FVA_CNS2$Rad_AF, levels=c(0:1), labels=c("No radiation","Any radiation"))
 
 table(FVA_CNS2$Rad_AF, useNA = "always")
 
-#chemo first course at any facility
+# chemo first course at any facility
 
 FVA_CNS2 <-FVA_CNS2 %>%
   mutate(Chemo_AF=case_when(RX_SUMM_CHEMO %in% c(0, 82, 85, 86, 87) ~0,
                              RX_SUMM_CHEMO>0 & RX_SUMM_CHEMO <4 ~1))
 
-FVA_CNS2$Chemo_AF<-factor(FVA_CNS2$Chemo_AF, levels=c(0:1),
-                            labels=c("No chemotherapy",
-                                     "Chemotherapy"))
+FVA_CNS2$Chemo_AF<-factor(FVA_CNS2$Chemo_AF, levels=c(0:1), labels=c("No chemotherapy", "Chemotherapy"))
 
 table(FVA_CNS2$Chemo_AF, useNA = "always")
 
@@ -244,16 +234,18 @@ table(FVA_CNS2[which(is.na(FVA_CNS2$CNStype)),]$HISTOLOGY, FVA_CNS2[which(is.na(
 ```{r}
 tab<-table(FVA_CNS2$PUF_FACILITY_ID, FVA_CNS2$YEAR_OF_DIAGNOSIS)
 tab2<-as.data.frame.matrix(tab)
-colnames(tab2)<-c("yr04", "yr05", "yr06", "yr07", "yr08", "yr09", "yr10","yr11", "yr12", "yr13", "yr14", "yr15","yr16", "yr17") #R doesn't like numerical column names
-tab2<-cbind(facility=rownames(tab2), tab2) #turn rows into a column (one column)
-rownames(tab2)<-NULL #remove row names from first 'column'
-#Code to exclude facilities not reporting all years
+colnames(tab2)<-c("yr04", "yr05", "yr06", "yr07", "yr08", "yr09", "yr10","yr11", "yr12", "yr13", "yr14", "yr15","yr16", "yr17") # R doesn't like numerical column names
+
+tab2<-cbind(facility=rownames(tab2), tab2) # turn rows into a column (one column)
+rownames(tab2)<-NULL # remove row names from first 'column'
+
+# Code to exclude facilities not reporting all years
 tab3<-subset(tab2, yr04==0|yr05==0|yr06==0|yr07==0|yr08==0|yr09==0|yr10==0|yr11==0|yr12==0|yr13==0|yr14==0|yr15==0|yr16==0|yr17==0)
 facility<-as.vector(tab3$facility)
 facility
 typeof(facility)
 
-#Remove anyone with a facility vector value 
+# Remove anyone with a facility vector value 
 exclude1<-FVA_CNS2[!(FVA_CNS2$PUF_FACILITY_ID%in%facility),]
 
 exclude1$Seq_no<-as.numeric(exclude1$SEQUENCE_NUMBER)
@@ -263,39 +255,32 @@ table(exclude1$SEQUENCE_NUMBER)
 
 
 # Need to do separate coding for facility volume for peds and adolescents/adults
+Peds
 ```{r}
-#The set of commented out code defines quartiles on an individual level. Need to redefine on a facility level because for adults Q4 only contains one facility.
-# create Peds dataset (0-14 years)
-peds_exclude1 <- exclude1 %>%
-  filter(exclude1$AGE<15)
-
-table(exclude1$YEAR_OF_DIAGNOSIS)
-
-# create adolescent and adults data set (15+)
-aa_exclude1 <- exclude1 %>%
-  filter(exclude1$AGE>=15)
-
-#calculate sum facility volume for each facility
+peds_exclude1 <- exclude1 %>% filter(exclude1$AGE<15) # create Peds dataset (0-14 years)
+n<-length(unique(exclude1$YEAR_OF_DIAGNOSIS)) # calculates number of years
+          
+# calculate number of patients seen at each facility  in peds_exclude1 dataframe
 peds_facility_vol<-peds_exclude1 %>%
   count(PUF_FACILITY_ID) %>%
   rename(CNS_VOL=n) %>%
-  mutate(CNS_VOL=CNS_VOL/14)
+  mutate(CNS_VOL=CNS_VOL/n)
 
-median(peds_facility_vol$CNS_VOL)
-test<-peds_facility_vol %>%
-  filter(CNS_VOL>4)
-hist(test$CNS_VOL)
-hist(peds_facility_vol$CNS_VOL)
+median(peds_facility_vol$CNS_VOL) 
+mean(peds_facility_vol$CNS_VOL) # very skewed mean and median are different
 
+peds_quantiles<-as.data.frame(quantile(peds_facility_vol$CNS_VOL, probs = seq(.1, 1, by = .005))) # gives percentiles by mean patients per year
+
+# plot a histogram of CNS_Vol and drawlines for quantiles
 A<-ggplot(peds_facility_vol, aes(CNS_VOL)) +
  geom_histogram(color="black", fill="black") +
   labs(title="a. Pediatric", y = "Count of facilities", x="Facility CNS patient volume/year")+
   theme(plot.title = element_text(face="bold"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(),   panel.background = element_blank(),axis.line = element_line(colour = "black"),
         axis.title.x=element_text(face="bold"), axis.title.y=element_text(face="bold")) +
-geom_vline(aes(xintercept=1.42857143), color="blue", linetype="dashed") +
-geom_vline(aes(xintercept=3.35714286), color="blue", linetype="dashed") +
-geom_vline(aes(xintercept=9.29285714), color="blue", linetype="dashed") +
-geom_vline(aes(xintercept=14.50714286), color="blue", linetype="dashed") +
+geom_vline(aes(xintercept=1.42857143), color="blue", linetype="dashed") + # 70th percentile
+geom_vline(aes(xintercept=3.35714286), color="blue", linetype="dashed") + # 80th percentil
+geom_vline(aes(xintercept=9.29285714), color="blue", linetype="dashed") + # 90th percentile
+geom_vline(aes(xintercept=14.50714286), color="blue", linetype="dashed") + #95th percentile
 annotate("text", x = 0, y = 75, label = "P1", fontface="bold", size=3) +
 annotate("text", x = 2.5, y = 75, label = "P2",fontface="bold", size=3) +
 annotate("text", x = 6.35, y = 75, label = "P3", fontface="bold",size=3) +
@@ -304,34 +289,53 @@ annotate("text", x = 20, y = 75, label = "P5", fontface="bold",size=3) +
   ylim(0,80)
 A 
 
-quantile(peds_facility_vol$CNS_VOL, probs = seq(.1, 1, by = .05))#note quantiles are at facility level
+peds_CNS<-merge(peds_exclude1, peds_facility_vol, by="PUF_FACILITY_ID") # merge  volume per year by facility into the individual level patient file
 
-peds_CNS<-merge(peds_exclude1, peds_facility_vol, by="PUF_FACILITY_ID")
-
-
-#make percentile categories
+# Categorize patients by percentile of facility volume
 peds_CNS<-peds_CNS %>%
-  mutate(vol_ptile=case_when(CNS_VOL<=1.42857143~0, #<=70th
-                             CNS_VOL>1.42857143 & CNS_VOL <=3.35714286 ~1, #>70-80
-                             CNS_VOL>3.35714286 & CNS_VOL <=9.29285714 ~2, #>80-90
-                             CNS_VOL>9.29285714 & CNS_VOL <=14.50714286  ~3, #>90-95
+  mutate(vol_ptile=case_when(CNS_VOL<=1.42857143~0, # <=70th
+                             CNS_VOL>1.42857143 & CNS_VOL <=3.35714286 ~1, # >70-80
+                             CNS_VOL>3.35714286 & CNS_VOL <=9.29285714 ~2, # >80-90
+                             CNS_VOL>9.29285714 & CNS_VOL <=14.50714286  ~3, # >90-95
                              CNS_VOL>14.50714286~4)) #>95
+# get means for each category
+df<-peds_CNS %>%
+  group_by(vol_ptile) %>%
+  summarise(mean = mean(CNS_VOL), min=min(CNS_VOL), max=max(CNS_VOL))
 
-table(peds_CNS$vol_ptile)
+# add more categories above the 95th percentile and collapse below the 80th
+peds_CNS<-peds_CNS %>%
+  mutate(vol_ptile2=case_when(CNS_VOL<=1.42857143~0, # <=70th
+                              CNS_VOL>1.42857143 & CNS_VOL <=3.35714286 ~1, # >70th to 80th
+                              CNS_VOL>3.35714286 & CNS_VOL<=9.29285714 ~2, # >80th to 90th
+                              CNS_VOL>9.29285714 & CNS_VOL<=14.50714286 ~3, # >90th to 95th
+                              CNS_VOL>14.50714286 & CNS_VOL<=29.83500000 ~4,  # >95th to 99th
+                              CNS_VOL>29.83500000 ~5)) # >99th
+
+table(peds_CNS$vol_ptile, peds_CNS$dead, useNA="always")  # check death distribution by volume p-tile
+table(peds_CNS$vol_ptile2, peds_CNS$dead, useNA="always") # check death distribution by volume p-tile2
 
 peds_CNS$CNS_VOL_flag<-"peds"
 
-peds_CNS$vol_ptile<-factor(peds_CNS$vol_ptile, levels=c(0:4), labels=c("<=70", ">70-80", ">80-90", ">90-95", ">95"))
+peds_CNS$vol_ptile<-factor(peds_CNS$vol_ptile, levels=c(0:4), labels=c("<=70", ">70-80", ">80-90", ">90-95", ">95")) # factor and add labels
+peds_CNS$vol_ptile2<-factor(peds_CNS$vol_ptile2, levels=c(0:5), labels=c("<=70", ">70-80", ">80-90", ">90-95", ">95-99", ">99")) # factor and add labels
+```
 
-#adult code
-#calculate facility volume for each facility
+adults
+```{r}
+# create adolescent and adults data set (15+)
+aa_exclude1 <- exclude1 %>%filter(exclude1$AGE>=15) 
+
+# calculate number of patients seen at each facility in adults_exclude1 dataframe
 aa_facility_vol<-aa_exclude1 %>%
   count(PUF_FACILITY_ID) %>%
   rename(CNS_VOL=n)%>%
   mutate(CNS_VOL=CNS_VOL/14)
-quantile(aa_facility_vol$CNS_VOL, probs = seq(.1, 1, by = .05))
+
+aa_quantiles<-as.data.frame(quantile(aa_facility_vol$CNS_VOL, probs = seq(.1, 1, by = .005))) # gives percentiles by mean patients per year
 
 aa_CNS<-merge(aa_exclude1, aa_facility_vol,  by="PUF_FACILITY_ID")
+
 aa_CNS <- aa_CNS %>%
 mutate(vol_ptile=case_when(CNS_VOL<=43.271429 ~0, #<=70th
                            CNS_VOL>43.271429 & CNS_VOL<=60.500000 ~1, #>70-80
@@ -339,6 +343,27 @@ mutate(vol_ptile=case_when(CNS_VOL<=43.271429 ~0, #<=70th
                            CNS_VOL>94.814286 & CNS_VOL <=145.885714 ~3, #>90-95
                            CNS_VOL >145.885714 ~4)) #>95
 table(aa_CNS$vol_ptile)
+
+# determine mean range
+df2<-aa_CNS %>%
+  group_by(vol_ptile) %>%
+  summarise(mean = mean(CNS_VOL), min=min(CNS_VOL), max=max(CNS_VOL))
+
+aa_CNS <- aa_CNS %>%
+mutate(vol_ptile2=case_when(CNS_VOL<=43.271429 ~0, #<=70th
+                           CNS_VOL> 43.271429 & CNS_VOL<=60.500000 ~1, #>70-80
+                           CNS_VOL>60.500000 & CNS_VOL<=94.814286 ~2, #>80-90
+                           CNS_VOL>94.814286 & CNS_VOL <=145.885714 ~3, #>90-95
+                           CNS_VOL>145.885714 & CNS_VOL <=256.411429 ~4, # >95-99
+                           CNS_VOL >256.411429 ~5)) # >99
+
+table(aa_CNS$vol_ptile2)
+
+# determine mean range
+df3<-aa_CNS %>%
+  group_by(vol_ptile2) %>%
+  summarise(mean = mean(CNS_VOL), min=min(CNS_VOL), max=max(CNS_VOL))
+
 
 B<-ggplot(aa_facility_vol, aes(CNS_VOL)) +
  geom_histogram(color="black", fill="black") +
@@ -363,36 +388,47 @@ dev.off()
 
 aa_CNS$vol_ptile<-factor(aa_CNS$vol_ptile, levels=c(0:4), labels=c("<=70", ">70-80", ">80-90", ">90-95", ">95"))
 
+aa_CNS$vol_ptile2<-factor(aa_CNS$vol_ptile2, levels=c(0:5), labels=c("<=70", ">70-80", ">80-90", ">90-95", ">95-99", ">99"))
+
 aa_CNS$CNS_VOL_flag<-"adult"
 
+table(aa_CNS$vol_ptile2)
+```
+
+
+# bind adults and kids back together
+```{r}
 boxplot(aa_CNS$CNS_VOL)
 boxplot(peds_CNS$CNS_VOL)
-#bind adults and kids back together
+
 exclude1<-rbind(peds_CNS, aa_CNS)
 
+# determine numbers of patients in each percentile group
+table(peds_CNS$vol_ptile2, peds_CNS$dead)
+table(aa_CNS$vol_ptile2, aa_CNS$dead)
+table(exclude1$vol_ptile2, exclude1$age_cat)
 ```
 
 # Exclusions
 ```{r}
-#include only first malignant CNS tumors diagnosed 
+# include only first malignant CNS tumors diagnosed 
 exclude2<-exclude1[which(exclude1$Seq_no %in%c(0,1)),]
 
-#Exclude individuals seen at more that one facility
+# Exclude individuals seen at more that one facility
 exclude3<-exclude2[which(exclude2$PUF_MULT_SOURCE==0),]
 
-#Exclude individuals diagnosed in 2017
+# Exclude individuals diagnosed in 2017
 exclude3<-exclude3%>%
   filter(YEAR_OF_DIAGNOSIS!=2017) #156,890
 
-#Exclude individuals with class of case 00
-
+# Exclude individuals with class of case 00
 exclude3<-exclude3 %>%
   filter(CLASS_OF_CASE>0) #148894
 ```
 
 # Need to exclude missing data
 ```{r}
-#examine missing data for variables used in the analysis
+# examine missing data for variables used in the analysis
 attach(exclude3)
 table(age_cat, useNA="always")
 table(Race_cat2, useNA="always")
@@ -453,8 +489,8 @@ Figure1
 label(exclude3$age_cat)<-"Age category"
 label(exclude3$sex)<-"Sex"
 label(exclude3$insurance)<-"Insurance at diagnosis or first treatment"
-label(exclude3$educ)<-"Zip-code median percent no high school degree quartile 2012-2016"
-label(exclude3$income)<-"Zip-code median income quartile 2012-2016"
+label(exclude3$educ)<-"Zip-code median percent no high school degree quartile"
+label(exclude3$income)<-"Zip-code median income quartile"
 label(exclude3$CNStype)<-"CNS tumor subtype"
 label(exclude3$Race_cat)<-"Race/ethnicity category"
 label(exclude3$Race_cat2)<-"Race category"
@@ -462,7 +498,7 @@ label(exclude3$Surgery_AF)<-"Surgical procedure of primary site at any facility"
 label(exclude3$Rad_AF)<-"Radiation at any facility"
 label(exclude3$Chemo_AF)<-"First course of chemotherapy at any facility"
 
-#make dead a factor variable just for this table
+# make dead a factor variable just for this table
 exclude3$dead2<-factor(exclude3$dead, levels=c(0,1), labels= c("Alive", "Deceased"))
 label(exclude3$dead2)<-"Vital status"
 
@@ -471,7 +507,7 @@ table1(~ age_cat+ sex + Race_cat2 + insurance + income + educ + CNStype + Surger
 
 # KM curves
 ```{r}
-#make function for KM curves for age groups
+# make function for KM curves for age groups
 KMplots<-function(age_catf, figtitle){
   x<-exclude3 %>%
   filter(age_cat==age_catf) 
@@ -481,7 +517,6 @@ ggsurvplot(survob, data=x,  pval=TRUE,  pval.method = FALSE,  ylim=c(0,1),  size
            conf.int=FALSE, censor=TRUE,  title=figtitle,  censor.size=0.5, 
            legend.title="Volume category", legend.labs=c("<=70",">70-80", ">80-90", ">90-95", ">95"),
            xlab="Survival time (months)") +
-
              theme_survminer(font.main = c(12, "bold", "black"), 
                 legend=c("bottom"), 
                 font.legend=c(12, "bold", "black"), 
@@ -572,12 +607,12 @@ dev.off()
 ```
 # Cox models for univariate analysis
 ```{r}
-#Cox models with RSE to account for clustering
+#Cox models with to account for clustering
 CoxAge<-function(age_catf){
   x<-exclude3 %>%
   filter(age_cat==age_catf) 
   y<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + cluster(PUF_FACILITY_ID), x)
-   o<<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~CNS_VOL + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + cluster(PUF_FACILITY_ID), x) #p-trend
+   o<<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~CNS_VOL + cluster(PUF_FACILITY_ID), x) #p-trend # edited mistake in this model (Table 2 needs updating for ptrend)
   pval<-summary(o)$coefficients[1,6]
   y<-as.data.frame(exp(cbind(HR = coef(y), confint(y))))
   y<-y %>%
@@ -597,12 +632,12 @@ table2a<-rbind(a,b,c,d)
 
 # Cox models for multivariable analysis
 ```{r}
-#Cox models
+# Cox models
 CoxAgeAdj<-function(age_catf){
   x<-exclude3 %>%
   filter(age_cat==age_catf) 
   y<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + cluster(PUF_FACILITY_ID), x)
-    o<<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~CNS_VOL + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + cluster(PUF_FACILITY_ID), x) #p-trend
+    o<<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~CNS_VOL + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + cluster(PUF_FACILITY_ID), x) # p-trend
   pval<-summary(o)$coefficients[1,6]
    y<-as.data.frame(exp(cbind(HR = coef(y), confint(y))))
    y<-y[c(1,2,3,4),]
@@ -632,11 +667,11 @@ table2$`97.5 %`<-round(table2$`97.5 %`,2)
 
 # Check for EM by race, sex, CNS tumor type
 ```{r}
-#Cox models for race interaction
+# Cox models for race interaction
 CoxAgeAdj<-function(age_catf){
   x<<-exclude3 %>%
   filter(age_cat==age_catf) 
-  mod1<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + cluster(PUF_FACILITY_ID), x)
+  mod1<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + AGE + Race_cat2 +educ +income +insurance + sex + CNStype + cluster(PUF_FACILITY_ID), x)
   mod2<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + Race_cat2*vol_ptile + cluster(PUF_FACILITY_ID), x)
   lrtest(mod1, mod2)%>%
    mutate(agegroup=age_catf,
@@ -650,7 +685,7 @@ h<-CoxAgeAdj("65+")
 
 table_supa<-rbind(e,f,g,h)
 
-#Cox models for sex interaction
+# Cox models for sex interaction
 CoxAgeAdj<-function(age_catf){
   x<-exclude3 %>%
   filter(age_cat==age_catf) 
@@ -781,7 +816,8 @@ mylist
 Sup_table2 <-Sup_table2 %>%
   mutate(CNS.type=factor(CNStype),
          CNS.type=factor(CNS.type,levels=mylist))
-#functions have different exclusions
+
+# functions have different exclusions
 plotCNS0<-function(agecat, title){
 Sup_table2 %>%
     filter(agegroup==agecat,
@@ -928,6 +964,7 @@ Sup_table3<-Sup_table3 %>%
   filter(Variable== "vol_ptile")
 Sup_table3$p<-round(Sup_table3$p, 5)
 ```
+
 # address PH Assumption by dividing into intervals 
 ```{r}
 PHresults<-function(age_catf, t, survt, time){
@@ -1215,7 +1252,6 @@ mod3<-mod3[-c(2, 3), ]
 mod3<-mod3 %>% 
   mutate(agegroup=age_catf, comparison=comp)
 }
-
 
 a<-RMSTmodu("0 to 14", c("<=70", ">70-80"), ">70-80 vs. <=70")
 a.1<-RMSTunct("0 to 14", c("<=70", ">70-80"), ">70-80 vs. <=70")
@@ -1538,9 +1574,6 @@ logistic<-Sup_table8 %>%
   theme(strip.placement = "inside", legend.position = "bottom",  strip.text = element_text(size = 7, face="bold", color="black"),
         plot.title = element_text(size = 10, face="bold"), strip.background = element_rect(fill="lightgray"))
 
-logistic
-
-
 ```
 
 
@@ -1548,8 +1581,9 @@ logistic
 # Check Cox models for effect modification by year of dx
 ```{r}
 table(exclude3$YEAR_OF_DIAGNOSIS)
-#Cox models for race interaction
-#divide year of dx into binary category
+
+
+# divide year of dx into binary category
 exclude3 <-exclude3 %>%
   mutate(yeardx_cat=case_when(YEAR_OF_DIAGNOSIS %in% c(2004, 2005, 2006, 2007, 2008, 2009) ~0,
                               YEAR_OF_DIAGNOSIS %in% c(2010, 2011, 2012, 2013, 2014, 2015, 2016) ~1))
@@ -1587,15 +1621,39 @@ CoxAgeAdj<-function(age_catf, yeardx_catf){
     mutate(year_category=yeardx_catf)
 }
 
-
 i<-CoxAgeAdj("0 to 14", "2004 to 2009")
 j<-CoxAgeAdj("0 to 14", "2010 to 2016")
 k<-CoxAgeAdj("65+", "2004 to 2009")
 l<-CoxAgeAdj("65+", "2010 to 2016")
 
 Sup_table9<-rbind(i,j,k,l)
+```
 
-write.xlsx(Sup_table8, file="Sup_table8.xlsx", keepNA=TRUE, overwrite=TRUE)
+# Look at composition of patients by year category across patient facility volume percentile categories
+```{r}
+# limit to 0-14 and facilities in the >95 percentile
+kids<-exclude3 %>% filter(age_cat=="0 to 14" & vol_ptile=="<=70")
+table1(~Race_cat3 + AGE + educ + income + insurance + sex |yeardx_cat, kids)
+
+# limit to 0-14 and facilities in the >95 percentile
+kids<-exclude3 %>% filter(age_cat=="0 to 14" & vol_ptile==">70-80")
+table1(~Race_cat3 + AGE + educ + income + insurance + sex |yeardx_cat, kids)
+
+# limit to 0-14 and facilities in the >95 percentile
+kids<-exclude3 %>% filter(age_cat=="0 to 14" & vol_ptile==">80-90")
+table1(~Race_cat3 + AGE + educ + income + insurance + sex |yeardx_cat, kids)
+
+# limit to 0-14 and facilities in the >95 percentile
+kids<-exclude3 %>% filter(age_cat=="0 to 14" & vol_ptile==">90-95")
+table1(~Race_cat3 + AGE + educ + income + insurance + sex |yeardx_cat, kids)
+
+# limit to 0-14 and facilities in the >95 percentile
+kids<-exclude3 %>% filter(age_cat=="0 to 14" & vol_ptile==">95")
+table1(~Race_cat3 + AGE + educ + income + insurance + sex |yeardx_cat, kids)
+
+# limit to 0-14 and facilities in the >99 percentile
+kids<-exclude3 %>% filter(age_cat=="0 to 14" & vol_ptile2==">99")
+table1(~Race_cat3 + AGE + educ + income + insurance + sex |yeardx_cat, kids)
 ```
 
 # Rerun excluding those who died in the first six months
@@ -1639,28 +1697,11 @@ h<-CoxAgeAdj("65+")
 summary(h)
 ```
 
-# Cox models that account for clustering of patients in hospitals (models random effect separately), Not used
-```{r}
-#R code for Cox model with random coefficients (effect of shock varies across hospitals)
-CoxRandom<-exclude3 %>%
-  filter(age_cat=="0 to 14") 
 
-mod1<-coxme(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~1 + (1|PUF_FACILITY_ID), ties="efron", CoxRandom)
-summary(mod1)
-summary(exclude3$DX_LASTCONTACT_DEATH_MONTHS)
-
-Model.frailty.gamma <- coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead) ~ vol_ptile + AGE  + Race_cat2 + educ +income +insurance + sex + CNStype + frailty(PUF_FACILITY_ID, distribution="gamma"), data=CoxRandom)
-summary(Model.frailty.gamma)
-
-Model.cluster <- coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead) ~ vol_ptile + AGE  + Race_cat2 + educ +income +insurance + sex + CNStype + cluster(PUF_FACILITY_ID), data=CoxRandom)
-summary(Model.cluster)
-```
-
-#look at patients per year by facility volume quartile
+# look at patients per year by facility volume quartile
 ```{r}
 #make dataset with unique Facility ids for PEDS and adults
 #Correct units for kids since it was not divided by year number above
-
 PPY<-exclude3 %>%
   select(PUF_FACILITY_ID, CNS_VOL_flag, vol_ptile, CNS_VOL) %>%
   group_by(CNS_VOL_flag, vol_ptile) %>%
@@ -1692,19 +1733,46 @@ Sup_table9<-Sup_table9 %>%
   rename(lowerCI=3, upperCI=4)
 ```
 
+# For Revision--run mean patients per year category varaible
+```{r}
+# Cox models 
+CoxAgeAdj_2<-function(age_catf){
+  x<-exclude3 %>%
+  filter(age_cat==age_catf) 
+  y<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~vol_ptile2 + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + cluster(PUF_FACILITY_ID), x)
+    o<<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~CNS_VOL + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + cluster(PUF_FACILITY_ID), x) # p-trend
+  pval<-summary(o)$coefficients[1,6]
+   y<-as.data.frame(exp(cbind(HR = coef(y), confint(y))))
+   y<-y[c(1,2,3,4,5),]
+   y<-y %>%
+    rownames_to_column() %>%
+    rename(Volume_category=rowname)%>%
+    mutate(agegroup=age_catf, ptrend=pval) %>%
+    mutate(model="adjusted for Race, age, educ, income, insurance, sex, and CNS tumor type")
+  
+}
+e<-CoxAgeAdj_2("0 to 14")
+f<-CoxAgeAdj_2("15 to 39")
+g<-CoxAgeAdj_2("40 to 64")
+h<-CoxAgeAdj_2("65+")
+
+table10<-rbind(e,f,g,h) # New online resource table 1
+```
+
 # Create excel workbook with files
 ```{r}
 sheets<-list("Table2 (overall CPH)" = table2, 
              "Table3 (adjusted RMST)" = table3, 
-             "Sup Table1 (EM tests)" = Sup_table1, 
-             "Sup Table2 (cancer type CPH)" = Sup_table2, 
-             "Sup Table3 (PH tests)" = Sup_table3, 
-             "Sup Table4 (PH int)" = Sup_table4, 
-             "Sup Table5 (PH int cantype)" = Sup_table5,
-             "Sup Table6 (RMST unadj)" = Sup_table6,
-             "Sup Table7 (RMST adj by type)" = Sup_table7,
-             "Sup Table8 (Treatment)" = Sup_table8,
-             "Sup Table9 (Year modification)" = Sup_table9)
+             "Sup Table1 (>99th percentile)" = table10,
+             "Sup Table2 (EM tests)" = Sup_table1, # the titles all moved down a number to accomodate table 10 for the revision, which becomes Online Resource Table 1
+             "Sup Table3 (cancer type CPH)" = Sup_table2, 
+             "Sup Table4 (PH tests)" = Sup_table3, 
+             "Sup Table5 (PH int)" = Sup_table4, 
+             "Sup Table6 (PH int cantype)" = Sup_table5,
+             "Sup Table7 (RMST unadj)" = Sup_table6,
+             "Sup Table8 (RMST adj by type)" = Sup_table7,
+             "Sup Table9 (Treatment)" = Sup_table8,
+             "Sup Table10 (Year modification)" = Sup_table9)
 write.xlsx(sheets, file="analysis_tables.xlsx", keepNA=TRUE, overwrite=TRUE)
 ```
 
@@ -1723,3 +1791,67 @@ table(test$CNStype, test$GRADE)
 
 table(exclude3$age_cat)
 ```
+
+
+# determine number of patients in vol_ptile categories and number of facilities in each category for response
+```{r}
+# determine facility n in each category for vol_ptile
+df<-exclude3 %>%
+  group_by(vol_ptile, age_cat) %>%
+   count(PUF_FACILITY_ID) 
+
+table(df$vol_ptile, df$age_cat)
+
+
+# determine facility n in each category for vol_ptile2
+df2<-exclude3 %>%
+  group_by(vol_ptile2, age_cat) %>%
+  count(PUF_FACILITY_ID) #each line is a unique facility id
+
+
+table(df2$vol_ptile2, df2$age_cat) # this gives the number of facilities in each volume percentile by age cat
+
+table( exclude3$vol_ptile2, exclude3$age_cat)
+```
+
+# Cox models for revision to address how facility type impacts survival in older adults, overall, by year period and by cancer type
+
+```{r}
+
+# factor FACILITY_TYPE_CD
+exclude3 <- exclude3 %>%
+  mutate(facility_type = case_when(FACILITY_TYPE_CD == 1 ~0,
+                                   FACILITY_TYPE_CD == 2 ~1,
+                                   FACILITY_TYPE_CD == 4 ~2,
+                                   FACILITY_TYPE_CD == 3 ~3))
+exclude3$facility_type <- factor(exclude3$facility_type, levels =c(0:3), labels = 
+                                   c("Community Cancer Program", "Comprehensive Community Cancer Program", "Integrated Network Cancer Program", "Academic/Research Program (includes NCI-designated comprehensive cancer centers)"))
+
+# Cox models
+CoxAgeAdj<-function(age_catf){
+  x<-exclude3 %>%
+  filter(age_cat==age_catf) 
+  y<-coxph(Surv(DX_LASTCONTACT_DEATH_MONTHS, dead)~facility_type + AGE + Race_cat2 + educ +income +insurance + sex + CNStype + cluster(PUF_FACILITY_ID), x)
+   y<-as.data.frame(exp(cbind(HR = coef(y), confint(y))))
+   #y<-y[c(1,2,3,4),]
+   y<-y %>%
+    rownames_to_column() %>%
+    rename(Volume_category=rowname)%>%
+    mutate(agegroup=age_catf) %>%
+    mutate(model="adjusted for Race, age, educ, income, insurance, sex, and CNS tumor type")
+  
+}
+
+g<-CoxAgeAdj("40 to 64")
+h<-CoxAgeAdj("65+")
+
+
+# look at a table of facility type by volume quartile
+df <- exclude3 %>%
+  filter(age_cat %in% c("40 to 60", "65+"))
+
+table(df$facility_type, df$vol_ptile2)
+
+
+```
+
